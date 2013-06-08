@@ -1,11 +1,12 @@
 /*
- * $Id$
- *
- * Copyright (c) 2009, Jay Loden, Giampaolo Rodola'. All rights reserved.
+ * Copyright (c) 2009, Giampaolo Rodola'. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  *
  * Functions specific to Sun OS Solaris platforms.
+ *
+ * Thanks to Justin Venus who originally wrote a consistent part of
+ * this in Cython which I later on translated in C.
  */
 
 #include <Python.h>
@@ -27,9 +28,6 @@
 #include <fcntl.h>
 #include <utmpx.h>
 #include <kstat.h>
-
-
-// conn
 #include <sys/ioctl.h>
 #include <sys/tihdr.h>
 #include <stropts.h>
@@ -44,27 +42,27 @@
  * Read a file content and fills a C structure with it.
  */
 int
-_fill_struct_from_file(char *path, void *fstruct, size_t size)
+psutil_file_to_struct(char *path, void *fstruct, size_t size)
 {
     int fd;
     size_t nbytes;
-	fd = open(path, O_RDONLY);
-	if (fd == -1) {
+    fd = open(path, O_RDONLY);
+    if (fd == -1) {
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path);
         return 0;
-	}
-	nbytes = read(fd, fstruct, size);
-	if (nbytes <= 0) {
-    	close(fd);
+    }
+    nbytes = read(fd, fstruct, size);
+    if (nbytes <= 0) {
+        close(fd);
         PyErr_SetFromErrno(PyExc_OSError);
         return 0;
-	}
-	if (nbytes != size) {
-    	close(fd);
+    }
+    if (nbytes != size) {
+        close(fd);
         PyErr_SetString(PyExc_RuntimeError, "structure size mismatch");
         return 0;
-	}
-	close(fd);
+    }
+    close(fd);
     return nbytes;
 }
 
@@ -76,17 +74,15 @@ _fill_struct_from_file(char *path, void *fstruct, size_t size)
 static PyObject*
 get_process_basic_info(PyObject* self, PyObject* args)
 {
-	int pid;
-	char path[100];
-	psinfo_t info;
+    int pid;
+    char path[100];
+    psinfo_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &pid)) {
+    if (! PyArg_ParseTuple(args, "i", &pid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/psinfo", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
     return Py_BuildValue("ikkdiiik",
                          info.pr_ppid,              // parent pid
                          info.pr_rssize,            // rss
@@ -106,17 +102,15 @@ get_process_basic_info(PyObject* self, PyObject* args)
 static PyObject*
 get_process_name_and_args(PyObject* self, PyObject* args)
 {
-	int pid;
-	char path[100];
-	psinfo_t info;
+    int pid;
+    char path[100];
+    psinfo_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &pid)) {
+    if (! PyArg_ParseTuple(args, "i", &pid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/psinfo", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
     return Py_BuildValue("ss", info.pr_fname,
                                info.pr_psargs);
 }
@@ -128,18 +122,15 @@ get_process_name_and_args(PyObject* self, PyObject* args)
 static PyObject*
 get_process_cpu_times(PyObject* self, PyObject* args)
 {
-	int pid;
-	char path[100];
-	pstatus_t info;
+    int pid;
+    char path[100];
+    pstatus_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &pid)) {
+    if (! PyArg_ParseTuple(args, "i", &pid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/status", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
-
     // results are more precise than os.times()
     return Py_BuildValue("dd", TV2DOUBLE(info.pr_utime),
                                TV2DOUBLE(info.pr_stime));
@@ -152,18 +143,15 @@ get_process_cpu_times(PyObject* self, PyObject* args)
 static PyObject*
 get_process_cred(PyObject* self, PyObject* args)
 {
-	int pid;
-	char path[100];
-	prcred_t info;
+    int pid;
+    char path[100];
+    prcred_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &pid)) {
+    if (! PyArg_ParseTuple(args, "i", &pid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/cred", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
-
     return Py_BuildValue("iiiiii", info.pr_ruid, info.pr_euid, info.pr_suid,
                                    info.pr_rgid, info.pr_egid, info.pr_sgid);
 }
@@ -179,14 +167,11 @@ get_process_num_ctx_switches(PyObject* self, PyObject* args)
     char path[100];
     prusage_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &pid)) {
+    if (! PyArg_ParseTuple(args, "i", &pid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/usage", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
-
     return Py_BuildValue("kk", info.pr_vctx, info.pr_ictx);
 }
 
@@ -213,7 +198,7 @@ get_process_io_counters(PyObject* self, PyObject* args)
         return NULL;
     }
     sprintf(path, "/proc/%i/usage", pid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info))) {
         return NULL;
     }
 
@@ -236,18 +221,15 @@ get_process_io_counters(PyObject* self, PyObject* args)
 static PyObject*
 query_process_thread(PyObject* self, PyObject* args)
 {
-	int tid;
-	char path[100];
-	lwpstatus_t info;
+    int tid;
+    char path[100];
+    lwpstatus_t info;
 
-    if (! PyArg_ParseTuple(args, "i", &tid)) {
+    if (! PyArg_ParseTuple(args, "i", &tid))
         return NULL;
-    }
     sprintf(path, "/proc/%i/lwp/1/lwpstatus", tid);
-    if (! _fill_struct_from_file(path, (void *)&info, sizeof(info))) {
+    if (! psutil_file_to_struct(path, (void *)&info, sizeof(info)))
         return NULL;
-    }
-
     return Py_BuildValue("dd", TV2DOUBLE(info.pr_utime),
                                TV2DOUBLE(info.pr_stime));
 }
@@ -267,13 +249,13 @@ get_swap_mem(PyObject* self, PyObject* args)
 // We're going to parse "swap -l" output from Python (sigh!)
 
 /*
-    struct swaptable 	*st;
-    struct swapent	*swapent;
-    int	i;
+    struct swaptable     *st;
+    struct swapent    *swapent;
+    int    i;
     struct stat64 statbuf;
     char *path;
     char fullpath[MAXPATHLEN+1];
-    int	num;
+    int    num;
 
     if ((num = swapctl(SC_GETNSWP, NULL)) == -1) {
         PyErr_SetFromErrno(PyExc_OSError);
@@ -293,8 +275,8 @@ get_swap_mem(PyObject* self, PyObject* args)
     }
     swapent = st->swt_ent;
     for (i = 0; i < num; i++, swapent++) {
-	    swapent->ste_path = path;
-	    path += MAXPATHLEN;
+        swapent->ste_path = path;
+        path += MAXPATHLEN;
     }
     st->swt_n = num;
     if ((num = swapctl(SC_LIST, st)) == -1) {
@@ -305,7 +287,7 @@ get_swap_mem(PyObject* self, PyObject* args)
     swapent = st->swt_ent;
     long t = 0, f = 0;
     for (i = 0; i < num; i++, swapent++) {
-	    int diskblks_per_page =(int)(sysconf(_SC_PAGESIZE) >> DEV_BSHIFT);
+        int diskblks_per_page =(int)(sysconf(_SC_PAGESIZE) >> DEV_BSHIFT);
         t += (long)swapent->ste_pages;
         f += (long)swapent->ste_free;
     }
@@ -314,10 +296,10 @@ get_swap_mem(PyObject* self, PyObject* args)
     return Py_BuildValue("(kk)", t, f);
 */
 
-    kstat_ctl_t	*kc;
-    kstat_t	    *k;
-    cpu_stat_t	*cpu;
-    int	        cpu_count = 0;
+    kstat_ctl_t    *kc;
+    kstat_t        *k;
+    cpu_stat_t    *cpu;
+    int            cpu_count = 0;
     int         flag = 0;
     uint_t      sin = 0;
     uint_t      sout = 0;
@@ -327,24 +309,24 @@ get_swap_mem(PyObject* self, PyObject* args)
         return PyErr_SetFromErrno(PyExc_OSError);;
     }
 
-	k = kc->kc_chain;
-  	while (k != NULL) {
-	    if((strncmp(k->ks_name, "cpu_stat", 8) == 0) && \
-	        (kstat_read(kc, k, NULL) != -1) )
-	    {
-	        flag = 1;
-		    cpu = (cpu_stat_t*) k->ks_data;
-		    sin += cpu->cpu_vminfo.pgswapin;    // num pages swapped in
-		    sout += cpu->cpu_vminfo.pgswapout;  // num pages swapped out
-	    }
-	    cpu_count += 1;
+    k = kc->kc_chain;
+      while (k != NULL) {
+        if((strncmp(k->ks_name, "cpu_stat", 8) == 0) && \
+            (kstat_read(kc, k, NULL) != -1) )
+        {
+            flag = 1;
+            cpu = (cpu_stat_t*) k->ks_data;
+            sin += cpu->cpu_vminfo.pgswapin;    // num pages swapped in
+            sout += cpu->cpu_vminfo.pgswapout;  // num pages swapped out
+        }
+        cpu_count += 1;
         k = k->ks_next;
     }
-	kstat_close(kc);
-	if (!flag) {
-    	PyErr_SetString(PyExc_RuntimeError, "no swap device was found");
-    	return NULL;
-	}
+    kstat_close(kc);
+    if (!flag) {
+        PyErr_SetString(PyExc_RuntimeError, "no swap device was found");
+        return NULL;
+    }
     return Py_BuildValue("(II)", sin, sout);
 }
 
@@ -469,10 +451,10 @@ get_system_per_cpu_times(PyObject* self, PyObject* args)
             PyErr_SetFromErrno(PyExc_OSError);
             goto error;
         }
-	    if (kstat_read(kc, ksp, &cs) == -1) {
+        if (kstat_read(kc, ksp, &cs) == -1) {
             PyErr_SetFromErrno(PyExc_OSError);
             goto error;
-	    }
+        }
 
         py_cputime = Py_BuildValue("ffff",
                                    (float)cs.cpu_sysinfo.cpu[CPU_USER],
@@ -565,11 +547,11 @@ get_process_memory_maps(PyObject* self, PyObject* args)
 {
     int pid;
     int fd;
-	char path[100];
-	char perms[10];
-	char *name;
-	struct stat st;
-	pstatus_t status;
+    char path[100];
+    char perms[10];
+    char *name;
+    struct stat st;
+    pstatus_t status;
 
     prxmap_t *xmap = NULL, *p;
     off_t size;
@@ -589,7 +571,7 @@ get_process_memory_maps(PyObject* self, PyObject* args)
     }
 
     sprintf(path, "/proc/%i/status", pid);
-    if (! _fill_struct_from_file(path, (void *)&status, sizeof(status))) {
+    if (! psutil_file_to_struct(path, (void *)&status, sizeof(status))) {
         goto error;
     }
 
@@ -601,17 +583,17 @@ get_process_memory_maps(PyObject* self, PyObject* args)
 
     size = st.st_size;
 
-	fd = open(path, O_RDONLY);
-	if (fd == -1) {
+    fd = open(path, O_RDONLY);
+    if (fd == -1) {
         PyErr_SetFromErrno(PyExc_OSError);
         goto error;
-	}
+    }
 
-	xmap = (prxmap_t *)malloc(size);
-	if (xmap == NULL) {
+    xmap = (prxmap_t *)malloc(size);
+    if (xmap == NULL) {
         PyErr_NoMemory();
         goto error;
-	}
+    }
 
     nread = pread(fd, xmap, size, 0);
     nmap = nread / sizeof(prxmap_t);
@@ -696,7 +678,7 @@ error:
 static PyObject*
 get_network_io_counters(PyObject* self, PyObject* args)
 {
-    kstat_ctl_t	*kc = NULL;
+    kstat_ctl_t    *kc = NULL;
     kstat_t *ksp;
     kstat_named_t *rbytes, *wbytes, *rpkts, *wpkts, *ierrs, *oerrs;
 
@@ -728,8 +710,8 @@ get_network_io_counters(PyObject* self, PyObject* args)
 
         if (kstat_read(kc, ksp, NULL) == -1) {
             errno = 0;
-			continue;
-		}
+            continue;
+        }
 
         rbytes = (kstat_named_t *)kstat_data_lookup(ksp, "rbytes");
         wbytes = (kstat_named_t *)kstat_data_lookup(ksp, "obytes");
@@ -871,7 +853,7 @@ get_process_connections(PyObject* self, PyObject* args)
 
     ctlbuf.buf = buf;
     ctlbuf.len = tor->OPT_offset + tor->OPT_length;
-    flags = 0;  // request to be sent in non-priority
+7    flags = 0;  // request to be sent in non-priority
 
     if (putmsg(sd, &ctlbuf, (struct strbuf *)0, flags) == -1) {
         PyErr_SetFromErrno(PyExc_OSError);
