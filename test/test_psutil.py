@@ -1017,7 +1017,7 @@ class TestProcess(TestCase):
             # on Linux, first thread id is supposed to be this process
             if LINUX:
                 self.assertEqual(step2[0].id, os.getpid())
-            Gathread = step2[0]
+            athread = step2[0]
             # test named tuple
             self.assertEqual(athread.id, athread[0])
             self.assertEqual(athread.user_time, athread[1])
@@ -2212,7 +2212,7 @@ def test_main():
             atexit.register(warn, "Couldn't run limited user tests ("
                                   "super-user privileges are required)")
 
-    #tests.append(TestExampleScripts)
+    tests.append(TestExampleScripts)
 
     for test_class in tests:
         test_suite.addTest(unittest.makeSuite(test_class))
