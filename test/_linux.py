@@ -138,6 +138,51 @@ class LinuxSpecificTestCase(unittest.TestCase):
         else:
             self.assertNotIn('guest_nice', fields)
 
+    def test_netstat_inet(self):
+        # Test TCP and UDP connections against 'netstat -antup'.
+        # This tests assume netstat output uses the same order in which
+        # psutil.net_connections() yields connections so it might be
+        # unreliable.
+        # It is also easy to incur into race conditions in case
+        # a connections borns or dies during between 2 calls.
+        def convert_addr(addr):
+            addr = addr.rsplit(':', 1)
+            addr[1] = int(addr[1])
+            return tuple(addr)
+
+        # retry as long as netstat and psutil return the same number
+        # of connections
+        for x in range(10):
+            cons = psutil.net_connections(kind='inet')
+            out = sh('netstat -antup').strip()
+            lines = out.split('\n')[2:]
+            if len(cons) == len(lines):
+                break
+        else:
+            self.skip("len connections mismatch (psutil=%s, netstat=%s)" \
+                      % (len(cons), len(lines)))
+
+        for line in lines:
+            status = None
+            conn = cons.pop(0)
+            if line.startswith('tcp'):
+                proto, _, _, laddr, raddr, status = line.split()[:6]
+            else:
+                proto, _, _, laddr, raddr = line.split()[:5]
+
+            self.assertEqual(convert_addr(laddr), conn.laddr)
+            if '*' not in raddr:
+                self.assertEqual(convert_addr(raddr), conn.raddr)
+            if status is not None:
+                self.assertEqual(status, str(conn.status))
+
+            pid = re.search(r'\s\d+/', line)
+            if pid is not None:
+                pid = pid.group(0).strip().replace('/', '')
+                self.assertEqual(int(pid), conn.pid)
+            else:
+                self.assertEqual(conn.pid, None)
+
 
 def test_main():
     test_suite = unittest.TestSuite()
