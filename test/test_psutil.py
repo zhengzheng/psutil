@@ -62,6 +62,7 @@ PYTHON = os.path.realpath(sys.executable)
 DEVNULL = open(os.devnull, 'r+')
 TESTFN = os.path.join(os.getcwd(), "$testfile")
 TESTFN_UNICODE = TESTFN + "ƒőő"
+TESTFILE_PREFIX = 'psutil-test-suite-'
 if not PY3:
     try:
         TESTFN_UNICODE = unicode(TESTFN_UNICODE, sys.getfilesystemencoding())
@@ -115,6 +116,26 @@ def get_test_subprocess(cmd=None, stdout=DEVNULL, stderr=DEVNULL, stdin=DEVNULL,
             wait_for_pid(sproc.pid)
     _subprocesses_started.add(sproc.pid)
     return sproc
+
+_testfiles = []
+
+def pyrun(src):
+    """Run python code 'src' in a separate interpreter.
+    Return interpreter subprocess.
+    """
+    if PY3:
+        src = bytes(src, 'ascii')
+    # could have used NamedTemporaryFile(delete=False) but it's
+    # >= 2.6 only
+    fd, path = tempfile.mkstemp(prefix=TESTFILE_PREFIX)
+    _testfiles.append(path)
+    f = open(path, 'wb')
+    try:
+        f.write(src)
+        f.flush()
+        return get_test_subprocess([PYTHON, f.name], stdout=None, stderr=None)
+    finally:
+        f.close()
 
 def warn(msg):
     """Raise a warning msg."""
@@ -1150,7 +1171,7 @@ class TestProcess(unittest.TestCase):
         assert io2.write_bytes >= io1.write_bytes, (io1, io2)
         # test writes
         io1 = p.get_io_counters()
-        f = tempfile.TemporaryFile()
+        f = tempfile.TemporaryFile(prefix=TESTFILE_PREFIX)
         if PY3:
             f.write(bytes("x" * 1000000, 'ascii'))
         else:
@@ -1921,41 +1942,34 @@ class TestProcess(unittest.TestCase):
             # this is the zombie process
             s = socket.socket(socket.AF_UNIX)
             s.connect('%s')
-            s.sendall(str(os.getpid()))
+            if sys.version_info < (3, ):
+                pid = str(os.getpid())
+            else:
+                pid = bytes(str(os.getpid()), 'ascii')
+            s.sendall(pid)
             s.close()
         """ % TESTFN)
-        f = sock = None
+        pyrun(src)
+        sock = None
         try:
-            f = tempfile.NamedTemporaryFile()
-            f.write(src)
-            f.flush()
             sock = socket.socket(socket.AF_UNIX)
             sock.settimeout(2)
             sock.bind(TESTFN)
             sock.listen(1)
-            subp = get_test_subprocess([PYTHON, f.name], stdout=None,
-                                       stderr=None)
             conn, _ = sock.accept()
             zpid = int(conn.recv(1024))
             zproc = psutil.Process(zpid)
             # Make sure we can re-instantiate the process after its
-            # status changed to zombie.
-            # All our API (pid_exists(), Process(), get_pid_list())
-            # is supposed to support zombie processes and treat them
-            # like any other process in a different status.
-            # Reason is we want to support the use case where one
-            # wants to identify and kill all zombie processes on
-            # the system.
+            # status changed to zombie and at least be able to
+            # query its status.
+            # XXX should we also assume ppid should be querable?
             call_until(lambda: zproc.status, "ret == psutil.STATUS_ZOMBIE")
             self.assertTrue(psutil.pid_exists(zpid))
             zproc = psutil.Process(zpid)
-            zproc.as_dict()
             descendants = [x.pid for x in \
                     psutil.Process(os.getpid()).get_children(recursive=True)]
             self.assertIn(zpid, descendants)
         finally:
-            if f is not None:
-                f.close()
             if sock is not None:
                 sock.close()
             reap_children(search_all=True)
@@ -2458,6 +2472,8 @@ def cleanup():
     DEVNULL.close()
     safe_remove(TESTFN)
     safe_rmdir(TESTFN_UNICODE)
+    for path in _testfiles:
+        safe_remove(path)
 
 atexit.register(cleanup)
 safe_remove(TESTFN)
