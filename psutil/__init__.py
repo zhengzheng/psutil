@@ -12,7 +12,7 @@ Python.
 
 from __future__ import division
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
 __all__ = [
@@ -247,6 +247,25 @@ class Process(object):
     def __repr__(self):
         return "<%s at %s>" % (self.__str__(), id(self))
 
+    def __eq__(self, other):
+        # Test for equality with another Process object based
+        # on PID and creation time.
+        # This pair is supposed to indentify a Process instance
+        # univocally over time (the PID alone is not enough as
+        # it might refer to a process whose PID has been reused).
+        # Here we get the cached version of create_time which was
+        # determined in __init__.
+        # If not present it means AD was raised therefore the
+        # comparison will be based on PID only.
+        if not isinstance(other, Process):
+            return False
+        p1 = (self.pid, self.__dict__.get('create_time', None))
+        p2 = (other.pid, other.__dict__.get('create_time', None))
+        return p1 == p2
+
+    def __hash__(self):
+        return self.pid
+
     # --- utility methods
 
     def as_dict(self, attrs=[], ad_value=None):
@@ -373,8 +392,9 @@ class Process(object):
                 # Attempt to guess only in case of an absolute path.
                 # It is not safe otherwise as the process might have
                 # changed cwd.
-                if os.path.isabs(exe) and os.path.isfile(exe) \
-                and os.access(exe, os.X_OK):
+                if (os.path.isabs(exe)
+                        and os.path.isfile(exe)
+                        and os.access(exe, os.X_OK)):
                     return exe
             if isinstance(fallback, AccessDenied):
                 raise fallback
@@ -1078,7 +1098,7 @@ def process_iter():
             yield proc
 
 
-def wait_procs(procs, timeout, callback=None):
+def wait_procs(procs, timeout=None, callback=None):
     """Convenience function which waits for a list of processes to
     terminate.
 
@@ -1109,7 +1129,7 @@ def wait_procs(procs, timeout, callback=None):
     >>> for p in procs:
     ...    p.terminate()
     ...
-    >>> gone, still_alive = wait_procs(procs, 3, callback=on_terminate)
+    >>> gone, still_alive = wait_procs(procs, timeout=3, callback=on_terminate)
     >>> for p in still_alive:
     ...     p.kill()
     """
@@ -1125,17 +1145,19 @@ def wait_procs(procs, timeout, callback=None):
                 if callback is not None:
                     callback(proc)
 
+    if timeout is not None and not timeout >= 0:
+        raise ValueError("timeout must be a positive integer, got %s" % timeout)
     timer = getattr(time, 'monotonic', time.time)
     gone = set()
     alive = set(procs)
     if callback is not None and not callable(callback):
         raise TypeError("callback %r is not a callable" % callable)
-    deadline = timer() + timeout
+    if timeout is not None:
+        deadline = timer() + timeout
 
     while alive:
-        if timeout <= 0:
+        if timeout is not None and timeout <= 0:
             break
-        len_total = len(alive)
         for proc in alive:
             # Make sure that every complete iteration (all processes)
             # will last max 1 sec.
@@ -1143,11 +1165,17 @@ def wait_procs(procs, timeout, callback=None):
             # single process: in case it terminates too late other
             # processes may disappear in the meantime and their PID
             # reused.
-            max_timeout = 1.0 / (len_total - len(gone))
-            timeout = min((deadline - timer()), max_timeout)
-            if timeout <= 0:
-                break
-            assert_gone(proc, timeout)
+            try:
+                max_timeout = 1.0 / (len(alive) - len(gone))
+            except ZeroDivisionError:
+                max_timeout = 1.0  # one alive remaining
+            if timeout is not None:
+                timeout = min((deadline - timer()), max_timeout)
+                if timeout <= 0:
+                    break
+                assert_gone(proc, timeout)
+            else:
+                assert_gone(proc, max_timeout)
         alive = alive - gone
 
     if alive:
@@ -1665,3 +1693,4 @@ if sys.version_info < (3, 0):
 
 if __name__ == "__main__":
     test()
+

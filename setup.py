@@ -4,11 +4,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import sys
+import fnmatch
 import os
 import shutil
-import fnmatch
-import traceback
+import sys
 try:
     from setuptools import setup, Extension
 except ImportError:
@@ -18,9 +17,9 @@ except ImportError:
 def clean():
     """'python setup.py clean' custom command."""
     def rglob(path, pattern):
-        return [os.path.join(dirpath, f) \
-            for dirpath, dirnames, files in os.walk(path) \
-            for f in fnmatch.filter(files, pattern)]
+        return [os.path.join(dirpath, f)
+                for dirpath, dirnames, files in os.walk(path)
+                for f in fnmatch.filter(files, pattern)]
 
     for dirname in ('build', 'dist'):
         if os.path.isdir(dirname):
@@ -36,6 +35,7 @@ def clean():
         for x in rglob('.', pattern):
             sys.stdout.write('rm %s\n' % x)
             os.remove(x)
+
 
 def get_version():
     INIT = os.path.abspath(os.path.join(os.path.dirname(__file__),
@@ -54,6 +54,7 @@ def get_version():
     finally:
         f.close()
 
+
 def get_description():
     README = os.path.abspath(os.path.join(os.path.dirname(__file__), 'README'))
     f = open(README, 'r')
@@ -66,7 +67,7 @@ def get_description():
 if os.name == 'posix':
     posix_extension = Extension(
         '_psutil_posix',
-        sources = ['psutil/_psutil_posix.c']
+        sources=['psutil/_psutil_posix.c'],
     )
 # Windows
 if sys.platform.startswith("win32"):
@@ -89,32 +90,34 @@ if sys.platform.startswith("win32"):
             # http://www.mingw.org/wiki/Use_more_recent_defined_functions
             ('_WIN32_WINNT', get_winver()),
             ('_AVAIL_WINVER_', get_winver()),
+            # see: https://code.google.com/p/psutil/issues/detail?id=348
+            ('PSAPI_VERSION', 1),
         ],
         libraries=[
             "psapi", "kernel32", "advapi32", "shell32", "netapi32", "iphlpapi",
             "wtsapi32",
         ],
-        #extra_compile_args=["/Z7"],
-        #extra_link_args=["/DEBUG"]
+        # extra_compile_args=["/Z7"],
+        # extra_link_args=["/DEBUG"]
     )]
 # OS X
 elif sys.platform.startswith("darwin"):
     extensions = [Extension(
         '_psutil_osx',
-        sources = [
+        sources=[
             'psutil/_psutil_osx.c',
             'psutil/_psutil_common.c',
             'psutil/arch/osx/process_info.c'
         ],
         extra_link_args=['-framework', 'CoreFoundation', '-framework', 'IOKit'],
-        ),
+    ),
         posix_extension,
     ]
 # FreeBSD
 elif sys.platform.startswith("freebsd"):
     extensions = [Extension(
         '_psutil_bsd',
-        sources = [
+        sources=[
             'psutil/_psutil_bsd.c',
             'psutil/_psutil_common.c',
             'psutil/arch/bsd/process_info.c'

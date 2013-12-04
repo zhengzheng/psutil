@@ -70,8 +70,8 @@ if not PY3:
     except UnicodeDecodeError:
         TESTFN_UNICODE = TESTFN + "???"
 
-EXAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(
-                               os.path.dirname(__file__)), 'examples'))
+EXAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                               '..', 'examples'))
 
 POSIX = os.name == 'posix'
 LINUX = sys.platform.startswith("linux")
@@ -116,7 +116,7 @@ def get_test_subprocess(cmd=None, stdout=DEVNULL, stderr=DEVNULL, stdin=DEVNULL,
                 warn("couldn't make sure test file was actually created")
         else:
             wait_for_pid(sproc.pid)
-    _subprocesses_started.add(sproc.pid)
+    _subprocesses_started.add(psutil.Process(sproc.pid))
     return sproc
 
 
@@ -228,22 +228,27 @@ def reap_children(search_all=False):
     no zombies stick around to hog resources and create problems when
     looking for refleaks.
     """
-    pids = _subprocesses_started
+    procs = _subprocesses_started.copy()
     if search_all:
         this_process = psutil.Process(os.getpid())
         for p in this_process.get_children(recursive=True):
-            pids.add(p.pid)
-    while pids:
-        pid = pids.pop()
+            procs.add(p)
+    for p in procs:
         try:
-            child = psutil.Process(pid)
-            child.kill()
+            p.terminate()
         except psutil.NoSuchProcess:
             pass
-        except psutil.AccessDenied:
-            warn("couldn't kill child process with pid %s" % pid)
-        else:
-            child.wait(timeout=3)
+    gone, alive = psutil.wait_procs(procs, timeout=3)
+    for p in alive:
+        warn("couldn't terminate process %s" % p)
+        try:
+            p.kill()
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = psutil.wait_procs(alive, timeout=3)
+    if alive:
+        warn("couldn't not kill processes %s" % str(alive))
+
 
 
 def check_ip_address(addr, family):
@@ -355,7 +360,7 @@ def retry_before_failing(ntimes=None):
                 try:
                     return fun(*args, **kwargs)
                 except AssertionError:
-                    err = sys.exc_info()[1]
+                    pass
             raise
         return wrapper
     return decorator
@@ -561,6 +566,12 @@ if not hasattr(unittest, 'skip'):
     del TestCase, skipIf, skipUnless
 
 
+# python 2.4
+if not hasattr(subprocess.Popen, 'terminate'):
+    subprocess.Popen.terminate = \
+        lambda self: psutil.Process(self.pid).terminate()
+
+
 # ===================================================================
 # --- System-related API tests
 # ===================================================================
@@ -592,8 +603,9 @@ class TestSystemAPIs(unittest.TestCase):
         sproc2 = get_test_subprocess()
         sproc3 = get_test_subprocess()
         procs = [psutil.Process(x.pid) for x in (sproc1, sproc2, sproc3)]
+        self.assertRaises(ValueError, psutil.wait_procs, procs, timeout=-1)
         t = time.time()
-        gone, alive = psutil.wait_procs(procs, 0.01, callback=callback)
+        gone, alive = psutil.wait_procs(procs, timeout=0.01, callback=callback)
 
         self.assertLess(time.time() - t, 0.5)
         self.assertEqual(gone, [])
@@ -603,7 +615,7 @@ class TestSystemAPIs(unittest.TestCase):
             self.assertFalse(hasattr(p, 'retcode'))
 
         sproc3.terminate()
-        gone, alive = psutil.wait_procs(procs, 0.03, callback=callback)
+        gone, alive = psutil.wait_procs(procs, timeout=0.03, callback=callback)
         self.assertEqual(len(gone), 1)
         self.assertEqual(len(alive), 2)
         self.assertIn(sproc3.pid, [x.pid for x in gone])
@@ -617,12 +629,21 @@ class TestSystemAPIs(unittest.TestCase):
 
         sproc1.terminate()
         sproc2.terminate()
-        gone, alive = psutil.wait_procs(procs, 0.03, callback=callback)
+        gone, alive = psutil.wait_procs(procs, timeout=0.03, callback=callback)
         self.assertEqual(len(gone), 3)
         self.assertEqual(len(alive), 0)
         self.assertEqual(set(l), set([sproc1.pid, sproc2.pid, sproc3.pid]))
         for p in gone:
             self.assertTrue(hasattr(p, 'retcode'))
+
+    def test_wait_procs_no_timeout(self):
+        sproc1 = get_test_subprocess()
+        sproc2 = get_test_subprocess()
+        sproc3 = get_test_subprocess()
+        procs = [psutil.Process(x.pid) for x in (sproc1, sproc2, sproc3)]
+        for p in procs:
+            p.terminate()
+        gone, alive = psutil.wait_procs(procs)
 
     def test_TOTAL_PHYMEM(self):
         x = psutil.TOTAL_PHYMEM
@@ -1598,9 +1619,12 @@ class TestProcess(unittest.TestCase):
         p.set_cpu_affinity(all_cpus)
         self.assertEqual(p.get_cpu_affinity(), all_cpus)
         #
+        self.assertRaises(TypeError, p.set_cpu_affinity, 1)
         p.set_cpu_affinity(initial)
         invalid_cpu = [len(psutil.cpu_times(percpu=True)) + 10]
         self.assertRaises(ValueError, p.set_cpu_affinity, invalid_cpu)
+        self.assertRaises(ValueError, p.set_cpu_affinity, range(10000, 11000))
+
 
     def test_get_open_files(self):
         # current process
@@ -2023,13 +2047,13 @@ class TestProcess(unittest.TestCase):
             s.sendall(pid)
             s.close()
         """ % TESTFN)
-        pyrun(src)
         sock = None
         try:
             sock = socket.socket(socket.AF_UNIX)
             sock.settimeout(2)
             sock.bind(TESTFN)
             sock.listen(1)
+            pyrun(src)
             conn, _ = sock.accept()
             zpid = int(conn.recv(1024))
             zproc = psutil.Process(zpid)
@@ -2040,8 +2064,8 @@ class TestProcess(unittest.TestCase):
             call_until(lambda: zproc.status, "ret == psutil.STATUS_ZOMBIE")
             self.assertTrue(psutil.pid_exists(zpid))
             zproc = psutil.Process(zpid)
-            descendants = [x.pid for x in
-                psutil.Process(os.getpid()).get_children(recursive=True)]
+            descendants = [x.pid for x in psutil.Process(
+                           os.getpid()).get_children(recursive=True)]
             self.assertIn(zpid, descendants)
         finally:
             if sock is not None:
@@ -2061,6 +2085,13 @@ class TestProcess(unittest.TestCase):
         p.wait()
         self.assertIn(str(sproc.pid), str(p))
         self.assertIn("terminated", str(p))
+
+    def test__eq__(self):
+        self.assertTrue(psutil.Process() == psutil.Process())
+
+    def test__hash__(self):
+        s = set([psutil.Process(), psutil.Process()])
+        self.assertEqual(len(s), 1)
 
     @unittest.skipIf(LINUX, 'PID 0 not available on Linux')
     def test_pid_0(self):
