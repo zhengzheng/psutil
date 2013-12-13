@@ -471,7 +471,6 @@ class ThreadTask(threading.Thread):
         self.join()
 
 
-# python 2.4
 if not hasattr(subprocess.Popen, 'terminate'):
     subprocess.Popen.terminate = \
         lambda self: psutil.Process(self.pid).terminate()
