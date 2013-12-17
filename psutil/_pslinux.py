@@ -17,14 +17,13 @@ import struct
 import sys
 import warnings
 
-import _psutil_linux
-import _psutil_posix
-
 from _psutil_linux import *  # needed for RLIMIT_* constants
 from psutil import _psposix
 from psutil._common import *
 from psutil._compat import PY3, xrange, namedtuple, wraps
 from psutil._error import AccessDenied, NoSuchProcess, TimeoutExpired
+import _psutil_linux
+import _psutil_posix
 
 
 __extra__all__ = [
@@ -37,6 +36,9 @@ __extra__all__ = [
     "CONN_LAST_ACK", "CONN_LISTEN", "CONN_CLOSING",
     # other
     "phymem_buffers", "cached_phymem"]
+
+
+# --- constants
 
 HAS_PRLIMIT = hasattr(_psutil_linux, "prlimit")
 
@@ -86,68 +88,15 @@ TCP_STATUSES = {
     "0B": CONN_CLOSING
 }
 
+nt_sys_vmem = namedtuple(
+    nt_sys_vmem.__name__,
+    list(nt_sys_vmem._fields) + ['active', 'inactive', 'buffers', 'cached'])
 
-def get_system_boot_time():
-    """Return the system boot time expressed in seconds since the epoch."""
-    global BOOT_TIME
-    f = open('/proc/stat', 'r')
-    try:
-        for line in f:
-            if line.startswith('btime'):
-                ret = float(line.strip().split()[1])
-                BOOT_TIME = ret
-                return ret
-        raise RuntimeError("line 'btime' not found")
-    finally:
-        f.close()
-
-
-def get_num_cpus():
-    """Return the number of logical CPUs in the system."""
-    try:
-        return os.sysconf("SC_NPROCESSORS_ONLN")
-    except ValueError:
-        # as a second fallback we try to parse /proc/cpuinfo
-        num = 0
-        f = open('/proc/cpuinfo', 'r')
-        try:
-            lines = f.readlines()
-        finally:
-            f.close()
-        for line in lines:
-            if line.lower().startswith('processor'):
-                num += 1
-
-    # unknown format (e.g. amrel/sparc architectures), see:
-    # http://code.google.com/p/psutil/issues/detail?id=200
-    # try to parse /proc/stat as a last resort
-    if num == 0:
-        f = open('/proc/stat', 'r')
-        try:
-            lines = f.readlines()
-        finally:
-            f.close()
-        search = re.compile('cpu\d')
-        for line in lines:
-            line = line.split(' ')[0]
-            if search.match(line):
-                num += 1
-
-    if num == 0:
-        raise RuntimeError("couldn't determine platform's number of CPUs")
-    return num
+nt_proc_extmem = namedtuple(
+    'extmem', ['rss', 'vms', 'shared', 'text', 'lib', 'data', 'dirty'])
 
 
 # --- system memory
-
-nt_virtmem_info = namedtuple('vmem', ' '.join([
-    # all platforms
-    'total', 'available', 'percent', 'used', 'free',
-    # linux specific
-    'active',
-    'inactive',
-    'buffers',
-    'cached']))
 
 def virtual_memory():
     total, free, buffers, shared, _, _ = _psutil_linux.get_sysinfo()
@@ -177,8 +126,8 @@ def virtual_memory():
     avail = free + buffers + cached
     used = total - free
     percent = usage_percent((total - avail), total, _round=1)
-    return nt_virtmem_info(total, avail, percent, used, free,
-                           active, inactive, buffers, cached)
+    return nt_sys_vmem(total, avail, percent, used, free,
+                       active, inactive, buffers, cached)
 
 
 def swap_memory():
@@ -206,15 +155,15 @@ def swap_memory():
             sin = sout = 0
     finally:
         f.close()
-    return nt_swapmeminfo(total, used, free, percent, sin, sout)
+    return nt_sys_swap(total, used, free, percent, sin, sout)
 
 
-@deprecated('psutil.virtual_memory().cached')
+@deprecated(replacement='psutil.virtual_memory().cached')
 def cached_phymem():
     return virtual_memory().cached
 
 
-@deprecated('psutil.virtual_memory().buffers')
+@deprecated(replacement='psutil.virtual_memory().buffers')
 def phymem_buffers():
     return virtual_memory().buffers
 
@@ -251,7 +200,7 @@ def _get_cputimes_ntuple():
     return (namedtuple('cputimes', ' '.join(fields)), rindex)
 
 
-def get_system_cpu_times():
+def get_sys_cpu_times():
     """Return a named tuple representing the following system-wide
     CPU times:
     (user, nice, system, idle, iowait, irq, softirq [steal, [guest,
@@ -269,7 +218,7 @@ def get_system_cpu_times():
     return nt(*fields)
 
 
-def get_system_per_cpu_times():
+def get_sys_per_cpu_times():
     """Return a list of namedtuple representing the CPU times
     for every CPU available on the system.
     """
@@ -290,41 +239,66 @@ def get_system_per_cpu_times():
         f.close()
 
 
-# --- disks
-
-def disk_partitions(all=False):
-    """Return mounted disk partitions as a list of nameduples"""
-    phydevs = []
-    f = open("/proc/filesystems", "r")
+def get_num_cpus():
+    """Return the number of logical CPUs in the system."""
     try:
-        for line in f:
-            if not line.startswith("nodev"):
-                phydevs.append(line.strip())
+        return os.sysconf("SC_NPROCESSORS_ONLN")
+    except ValueError:
+        # as a second fallback we try to parse /proc/cpuinfo
+        num = 0
+        f = open('/proc/cpuinfo', 'r')
+        try:
+            lines = f.readlines()
+        finally:
+            f.close()
+        for line in lines:
+            if line.lower().startswith('processor'):
+                num += 1
+
+    # unknown format (e.g. amrel/sparc architectures), see:
+    # http://code.google.com/p/psutil/issues/detail?id=200
+    # try to parse /proc/stat as a last resort
+    if num == 0:
+        f = open('/proc/stat', 'r')
+        try:
+            lines = f.readlines()
+        finally:
+            f.close()
+        search = re.compile('cpu\d')
+        for line in lines:
+            line = line.split(' ')[0]
+            if search.match(line):
+                num += 1
+
+    if num == 0:
+        # mimic os.cpu_count()
+        return None
+    return num
+
+
+def get_num_phys_cpus():
+    """Return the number of physical CPUs in the system."""
+    f = open('/proc/cpuinfo', 'r')
+    try:
+        lines = f.readlines()
     finally:
         f.close()
-
-    retlist = []
-    partitions = _psutil_linux.get_disk_partitions()
-    for partition in partitions:
-        device, mountpoint, fstype, opts = partition
-        if device == 'none':
-            device = ''
-        if not all:
-            if device == '' or fstype not in phydevs:
-                continue
-        ntuple = nt_partition(device, mountpoint, fstype, opts)
-        retlist.append(ntuple)
-    return retlist
-
-get_disk_usage = _psposix.get_disk_usage
+    found = set()
+    for line in lines:
+        if line.lower().startswith('physical id'):
+            found.add(line.strip())
+    if found:
+        return len(found)
+    else:
+        return None  # mimic os.cpu_count()
 
 
 # --- other system functions
 
-def get_system_users():
+def get_users():
     """Return currently connected users as a list of namedtuples."""
     retlist = []
-    rawlist = _psutil_linux.get_system_users()
+    rawlist = _psutil_linux.get_users()
     for item in rawlist:
         user, tty, hostname, tstamp, user_process = item
         # note: the underlying C function includes entries about
@@ -334,14 +308,29 @@ def get_system_users():
             continue
         if hostname == ':0.0':
             hostname = 'localhost'
-        nt = nt_user(user, tty or None, hostname, tstamp)
+        nt = nt_sys_user(user, tty or None, hostname, tstamp)
         retlist.append(nt)
     return retlist
 
 
+def get_boot_time():
+    """Return the system boot time expressed in seconds since the epoch."""
+    global BOOT_TIME
+    f = open('/proc/stat', 'r')
+    try:
+        for line in f:
+            if line.startswith('btime'):
+                ret = float(line.strip().split()[1])
+                BOOT_TIME = ret
+                return ret
+        raise RuntimeError("line 'btime' not found")
+    finally:
+        f.close()
+
+
 # --- processes
 
-def get_pid_list():
+def get_pids():
     """Returns a list of PIDs currently running on the system."""
     pids = [int(x) for x in os.listdir('/proc') if x.isdigit()]
     return pids
@@ -436,6 +425,34 @@ def disk_io_counters():
     return retdict
 
 
+def disk_partitions(all=False):
+    """Return mounted disk partitions as a list of nameduples"""
+    phydevs = []
+    f = open("/proc/filesystems", "r")
+    try:
+        for line in f:
+            if not line.startswith("nodev"):
+                phydevs.append(line.strip())
+    finally:
+        f.close()
+
+    retlist = []
+    partitions = _psutil_linux.get_disk_partitions()
+    for partition in partitions:
+        device, mountpoint, fstype, opts = partition
+        if device == 'none':
+            device = ''
+        if not all:
+            if device == '' or fstype not in phydevs:
+                continue
+        ntuple = nt_sys_diskpart(device, mountpoint, fstype, opts)
+        retlist.append(ntuple)
+    return retlist
+
+
+get_disk_usage = _psposix.get_disk_usage
+
+
 # --- decorators
 
 def wrap_exceptions(fun):
@@ -469,7 +486,7 @@ class Process(object):
         self._process_name = None
 
     @wrap_exceptions
-    def get_process_name(self):
+    def get_name(self):
         f = open("/proc/%s/stat" % self.pid)
         try:
             name = f.read().split(' ')[1].replace('(', '').replace(')', '')
@@ -478,7 +495,7 @@ class Process(object):
         # XXX - gets changed later and probably needs refactoring
         return name
 
-    def get_process_exe(self):
+    def get_exe(self):
         try:
             exe = os.readlink("/proc/%s/exe" % self.pid)
         except (OSError, IOError):
@@ -509,7 +526,7 @@ class Process(object):
         return exe
 
     @wrap_exceptions
-    def get_process_cmdline(self):
+    def get_cmdline(self):
         f = open("/proc/%s/cmdline" % self.pid)
         try:
             # return the args as a list
@@ -518,7 +535,7 @@ class Process(object):
             f.close()
 
     @wrap_exceptions
-    def get_process_terminal(self):
+    def get_terminal(self):
         tmap = _psposix._get_terminal_map()
         f = open("/proc/%s/stat" % self.pid)
         try:
@@ -532,7 +549,7 @@ class Process(object):
 
     if os.path.exists('/proc/%s/io' % os.getpid()):
         @wrap_exceptions
-        def get_process_io_counters(self):
+        def get_io_counters(self):
             fname = "/proc/%s/io" % self.pid
             f = open(fname)
             try:
@@ -550,11 +567,11 @@ class Process(object):
                     if x is None:
                         raise NotImplementedError(
                             "couldn't read all necessary info from %r" % fname)
-                return nt_io(rcount, wcount, rbytes, wbytes)
+                return nt_proc_io(rcount, wcount, rbytes, wbytes)
             finally:
                 f.close()
     else:
-        def get_process_io_counters(self):
+        def get_io_counters(self):
             raise NotImplementedError("couldn't find /proc/%s/io (kernel "
                                       "too old?)" % self.pid)
 
@@ -570,7 +587,7 @@ class Process(object):
         values = st.split(' ')
         utime = float(values[11]) / CLOCK_TICKS
         stime = float(values[12]) / CLOCK_TICKS
-        return nt_cputimes(utime, stime)
+        return nt_proc_cpu(utime, stime)
 
     @wrap_exceptions
     def process_wait(self, timeout=None):
@@ -580,7 +597,7 @@ class Process(object):
             raise TimeoutExpired(self.pid, self._process_name)
 
     @wrap_exceptions
-    def get_process_create_time(self):
+    def get_create_time(self):
         f = open("/proc/%s/stat" % self.pid)
         try:
             st = f.read().strip()
@@ -594,7 +611,7 @@ class Process(object):
         # We first divide it for clock ticks and then add uptime returning
         # seconds since the epoch, in UTC.
         # Also use cached value if available.
-        boot_time = BOOT_TIME or get_system_boot_time()
+        boot_time = BOOT_TIME or get_boot_time()
         starttime = (float(values[19]) / CLOCK_TICKS) + boot_time
         return starttime
 
@@ -603,12 +620,10 @@ class Process(object):
         f = open("/proc/%s/statm" % self.pid)
         try:
             vms, rss = f.readline().split()[:2]
-            return nt_meminfo(int(rss) * PAGESIZE,
-                              int(vms) * PAGESIZE)
+            return nt_proc_mem(int(rss) * PAGESIZE,
+                               int(vms) * PAGESIZE)
         finally:
             f.close()
-
-    _nt_ext_mem = namedtuple('meminfo', 'rss vms shared text lib data dirty')
 
     @wrap_exceptions
     def get_ext_memory_info(self):
@@ -629,7 +644,7 @@ class Process(object):
                 [int(x) * PAGESIZE for x in f.readline().split()[:7]]
         finally:
             f.close()
-        return self._nt_ext_mem(rss, vms, shared, text, lib, data, dirty)
+        return nt_proc_extmem(rss, vms, shared, text, lib, data, dirty)
 
     _mmap_base_fields = ['path', 'rss', 'size', 'pss', 'shared_clean',
                          'shared_dirty', 'private_clean', 'private_dirty',
@@ -718,7 +733,7 @@ class Process(object):
             raise NotImplementedError(msg)
 
     @wrap_exceptions
-    def get_process_cwd(self):
+    def get_cwd(self):
         # readlink() might return paths containing null bytes causing
         # problems when used with other fs-related functions (os.*,
         # open(), ...)
@@ -736,7 +751,7 @@ class Process(object):
                 elif line.startswith("nonvoluntary_ctxt_switches"):
                     unvol = int(line.split()[1])
                 if vol is not None and unvol is not None:
-                    return nt_ctxsw(vol, unvol)
+                    return nt_proc_ctxsw(vol, unvol)
             raise NotImplementedError(
                 "'voluntary_ctxt_switches' and 'nonvoluntary_ctxt_switches'"
                 "fields were not found in /proc/%s/status; the kernel is "
@@ -745,7 +760,7 @@ class Process(object):
             f.close()
 
     @wrap_exceptions
-    def get_process_num_threads(self):
+    def get_num_threads(self):
         f = open("/proc/%s/status" % self.pid)
         try:
             for line in f:
@@ -756,7 +771,7 @@ class Process(object):
             f.close()
 
     @wrap_exceptions
-    def get_process_threads(self):
+    def get_threads(self):
         thread_ids = os.listdir("/proc/%s/task" % self.pid)
         thread_ids.sort()
         retlist = []
@@ -781,7 +796,7 @@ class Process(object):
             values = st.split(' ')
             utime = float(values[11]) / CLOCK_TICKS
             stime = float(values[12]) / CLOCK_TICKS
-            ntuple = nt_thread(int(thread_id), utime, stime)
+            ntuple = nt_proc_thread(int(thread_id), utime, stime)
             retlist.append(ntuple)
         if hit_enoent:
             # raise NSP if the process disappeared on us
@@ -789,7 +804,7 @@ class Process(object):
         return retlist
 
     @wrap_exceptions
-    def get_process_nice(self):
+    def get_nice(self):
         #f = open('/proc/%s/stat' % self.pid, 'r')
         # try:
         #   data = f.read()
@@ -801,23 +816,23 @@ class Process(object):
         return _psutil_posix.getpriority(self.pid)
 
     @wrap_exceptions
-    def set_process_nice(self, value):
+    def set_proc_nice(self, value):
         return _psutil_posix.setpriority(self.pid, value)
 
     @wrap_exceptions
-    def get_process_cpu_affinity(self):
+    def get_cpu_affinity(self):
         from_bitmask = lambda x: [i for i in xrange(64) if (1 << i) & x]
-        bitmask = _psutil_linux.get_process_cpu_affinity(self.pid)
+        bitmask = _psutil_linux.get_proc_cpu_affinity(self.pid)
         return from_bitmask(bitmask)
 
     @wrap_exceptions
-    def set_process_cpu_affinity(self, cpus):
+    def set_proc_cpu_affinity(self, cpus):
         try:
-            _psutil_linux.set_process_cpu_affinity(self.pid, cpus)
+            _psutil_linux.set_proc_cpu_affinity(self.pid, cpus)
         except OSError:
             err = sys.exc_info()[1]
             if err.errno == errno.EINVAL:
-                allcpus = tuple(range(len(get_system_per_cpu_times())))
+                allcpus = tuple(range(len(get_sys_per_cpu_times())))
                 for cpu in cpus:
                     if cpu not in allcpus:
                         raise ValueError("invalid CPU #%i (choose between %s)"
@@ -828,12 +843,12 @@ class Process(object):
     if hasattr(_psutil_linux, "ioprio_get"):
 
         @wrap_exceptions
-        def get_process_ionice(self):
+        def get_ionice(self):
             ioclass, value = _psutil_linux.ioprio_get(self.pid)
-            return nt_ionice(ioclass, value)
+            return nt_proc_ionice(ioclass, value)
 
         @wrap_exceptions
-        def set_process_ionice(self, ioclass, value):
+        def set_proc_ionice(self, ioclass, value):
             if ioclass in (IOPRIO_CLASS_NONE, None):
                 if value:
                     msg = "can't specify value with IOPRIO_CLASS_NONE"
@@ -857,7 +872,11 @@ class Process(object):
 
     if HAS_PRLIMIT:
         @wrap_exceptions
-        def process_rlimit(self, resource, limits=None):
+        def prlimit(self, resource, limits=None):
+            # if pid is 0 prlimit() applies to the calling process and
+            # we don't want that
+            if self.pid == 0:
+                raise ValueError("can't use prlimit() against PID 0 process")
             if limits is None:
                 # get
                 return _psutil_linux.prlimit(self.pid, resource)
@@ -870,7 +889,7 @@ class Process(object):
                 _psutil_linux.prlimit(self.pid, resource, soft, hard)
 
     @wrap_exceptions
-    def get_process_status(self):
+    def get_status(self):
         f = open("/proc/%s/status" % self.pid)
         try:
             for line in f:
@@ -905,7 +924,7 @@ class Process(object):
                     # so we skip it. A regular file is always supposed
                     # to be absolutized though.
                     if file.startswith('/') and isfile_strict(file):
-                        ntuple = nt_openfile(file, int(fd))
+                        ntuple = nt_proc_file(file, int(fd))
                         retlist.append(ntuple)
         if hit_enoent:
             # raise NSP if the process disappeared on us
@@ -977,8 +996,8 @@ class Process(object):
                             else:
                                 status = CONN_NONE
                             fd = int(inodes[inode])
-                            conn = nt_connection(fd, family, type_, laddr,
-                                                 raddr, status)
+                            conn = nt_proc_conn(fd, family, type_, laddr,
+                                                raddr, status)
                             retlist.append(conn)
                     elif family == socket.AF_UNIX:
                         tokens = line.split()
@@ -991,8 +1010,8 @@ class Process(object):
                                 path = ""
                             fd = int(inodes[inode])
                             type_ = int(type_)
-                            conn = nt_connection(fd, family, type_, path,
-                                                 None, CONN_NONE)
+                            conn = nt_proc_conn(fd, family, type_, path,
+                                                None, CONN_NONE)
                             retlist.append(conn)
                     else:
                         raise ValueError(family)
@@ -1034,7 +1053,7 @@ class Process(object):
         return len(os.listdir("/proc/%s/fd" % self.pid))
 
     @wrap_exceptions
-    def get_process_ppid(self):
+    def get_ppid(self):
         f = open("/proc/%s/status" % self.pid)
         try:
             for line in f:
@@ -1046,25 +1065,25 @@ class Process(object):
             f.close()
 
     @wrap_exceptions
-    def get_process_uids(self):
+    def get_uids(self):
         f = open("/proc/%s/status" % self.pid)
         try:
             for line in f:
                 if line.startswith('Uid:'):
                     _, real, effective, saved, fs = line.split()
-                    return nt_uids(int(real), int(effective), int(saved))
+                    return nt_proc_uids(int(real), int(effective), int(saved))
             raise NotImplementedError("line not found")
         finally:
             f.close()
 
     @wrap_exceptions
-    def get_process_gids(self):
+    def get_gids(self):
         f = open("/proc/%s/status" % self.pid)
         try:
             for line in f:
                 if line.startswith('Gid:'):
                     _, real, effective, saved, fs = line.split()
-                    return nt_gids(int(real), int(effective), int(saved))
+                    return nt_proc_gids(int(real), int(effective), int(saved))
             raise NotImplementedError("line not found")
         finally:
             f.close()

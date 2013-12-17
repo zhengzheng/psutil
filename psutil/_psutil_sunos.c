@@ -74,7 +74,7 @@ psutil_file_to_struct(char *path, void *fstruct, size_t size)
  * as a Python tuple.
  */
 static PyObject *
-get_process_basic_info(PyObject *self, PyObject *args)
+get_proc_basic_info(PyObject *self, PyObject *args)
 {
     int pid;
     char path[100];
@@ -102,7 +102,7 @@ get_process_basic_info(PyObject *self, PyObject *args)
  * Return process name and args as a Python tuple.
  */
 static PyObject *
-get_process_name_and_args(PyObject *self, PyObject *args)
+get_proc_name_and_args(PyObject *self, PyObject *args)
 {
     int pid;
     char path[100];
@@ -121,7 +121,7 @@ get_process_name_and_args(PyObject *self, PyObject *args)
  * Return process user and system CPU times as a Python tuple.
  */
 static PyObject *
-get_process_cpu_times(PyObject *self, PyObject *args)
+get_proc_cpu_times(PyObject *self, PyObject *args)
 {
     int pid;
     char path[100];
@@ -143,7 +143,7 @@ get_process_cpu_times(PyObject *self, PyObject *args)
  * Return process uids/gids as a Python tuple.
  */
 static PyObject *
-get_process_cred(PyObject *self, PyObject *args)
+get_proc_cred(PyObject *self, PyObject *args)
 {
     int pid;
     char path[100];
@@ -164,7 +164,7 @@ get_process_cred(PyObject *self, PyObject *args)
  * Return process uids/gids as a Python tuple.
  */
 static PyObject *
-get_process_num_ctx_switches(PyObject *self, PyObject *args)
+get_proc_num_ctx_switches(PyObject *self, PyObject *args)
 {
     int pid;
     char path[100];
@@ -191,7 +191,7 @@ get_process_num_ctx_switches(PyObject *self, PyObject *args)
  *    ...they should be meaningless anyway.
  *
 static PyObject*
-get_process_io_counters(PyObject* self, PyObject* args)
+get_proc_io_counters(PyObject* self, PyObject* args)
 {
     int pid;
     char path[100];
@@ -250,7 +250,8 @@ get_swap_mem(PyObject *self, PyObject *args)
 // total/free swap mem: commented out as for some reason I can't
 // manage to get the same results shown by "swap -l", despite the
 // code below is exactly the same as:
-// http://cvs.opensolaris.org/source/xref/onnv/onnv-gate/usr/src/cmd/swap/swap.c
+// http://cvs.opensolaris.org/source/xref/onnv/onnv-gate/usr/src/
+//    cmd/swap/swap.c
 // We're going to parse "swap -l" output from Python (sigh!)
 
 /*
@@ -301,10 +302,10 @@ get_swap_mem(PyObject *self, PyObject *args)
     return Py_BuildValue("(kk)", t, f);
 */
 
-    kstat_ctl_t    *kc;
-    kstat_t        *k;
-    cpu_stat_t    *cpu;
-    int            cpu_count = 0;
+    kstat_ctl_t *kc;
+    kstat_t     *k;
+    cpu_stat_t  *cpu;
+    int         cpu_count = 0;
     int         flag = 0;
     uint_t      sin = 0;
     uint_t      sout = 0;
@@ -340,7 +341,7 @@ get_swap_mem(PyObject *self, PyObject *args)
  * Return users currently connected on the system.
  */
 static PyObject *
-get_system_users(PyObject *self, PyObject *args)
+get_users(PyObject *self, PyObject *args)
 {
     struct utmpx *ut;
     PyObject *ret_list = PyList_New(0);
@@ -432,7 +433,7 @@ error:
  * Return system-wide CPU times.
  */
 static PyObject *
-get_system_per_cpu_times(PyObject *self, PyObject *args)
+get_sys_per_cpu_times(PyObject *self, PyObject *args)
 {
     kstat_ctl_t *kc;
     kstat_t *ksp;
@@ -526,7 +527,8 @@ get_disk_io_counters(PyObject *self, PyObject *args)
                 );
                 if (!py_disk_info)
                     goto error;
-                if (PyDict_SetItemString(py_retdict, ksp->ks_name, py_disk_info))
+                if (PyDict_SetItemString(py_retdict, ksp->ks_name,
+                                         py_disk_info))
                     goto error;
                 Py_DECREF(py_disk_info);
             }
@@ -550,7 +552,7 @@ error:
  * Return process memory mappings.
  */
 static PyObject *
-get_process_memory_maps(PyObject *self, PyObject *args)
+get_proc_memory_maps(PyObject *self, PyObject *args)
 {
     int pid;
     int fd = -1;
@@ -636,7 +638,8 @@ get_process_memory_maps(PyObject *self, PyObject *args)
                 stk_base_sz = status.pr_stkbase + status.pr_stksize;
                 brk_base_sz = status.pr_brkbase + status.pr_brksize;
 
-                if ((pr_addr_sz > status.pr_stkbase) && (p->pr_vaddr < stk_base_sz)) {
+                if ((pr_addr_sz > status.pr_stkbase) &&
+                        (p->pr_vaddr < stk_base_sz)) {
                     name = "[stack]";
                 }
                 else if ((p->pr_mflags & MA_ANON) && \
@@ -792,12 +795,14 @@ static int PSUTIL_CONN_NONE = 128;
  * Return TCP and UDP connections opened by process.
  *
  * Thanks to:
- * https://github.com/DavidGriffith/finx/blob/master/nxsensor-3.5.0-1/src/sysdeps/solaris.c
+ * https://github.com/DavidGriffith/finx/blob/master/
+ *     nxsensor-3.5.0-1/src/sysdeps/solaris.c
  * ...and:
- * https://hg.java.net/hg/solaris~on-src/file/tip/usr/src/cmd/cmd-inet/usr.bin/netstat/netstat.c
+ * https://hg.java.net/hg/solaris~on-src/file/tip/usr/src/cmd/
+ *     cmd-inet/usr.bin/netstat/netstat.c
  */
 static PyObject *
-get_process_connections(PyObject *self, PyObject *args)
+get_proc_connections(PyObject *self, PyObject *args)
 {
     long pid;
     int sd = NULL;
@@ -908,8 +913,6 @@ get_process_connections(PyObject *self, PyObject *args)
         databuf.len = 0;
         databuf.buf = (char *)malloc((int)mibhdr->len);
         if (!databuf.buf) {
-            //perror("malloc");
-            //break;
             PyErr_NoMemory();
             goto error;
         }
@@ -962,7 +965,8 @@ get_process_connections(PyObject *self, PyObject *args)
         }
 #if defined(AF_INET6)
         // TCPv6
-        else if (mibhdr->level == MIB2_TCP6 && mibhdr->name == MIB2_TCP6_CONN) {
+        else if (mibhdr->level == MIB2_TCP6 && mibhdr->name == MIB2_TCP6_CONN)
+        {
             tp6 = (mib2_tcp6ConnEntry_t *)databuf.buf;
             num_ent = mibhdr->len / sizeof(mib2_tcp6ConnEntry_t);
 
@@ -971,8 +975,10 @@ get_process_connections(PyObject *self, PyObject *args)
                 if (tp6->tcp6ConnCreationProcess != pid)
                     continue;
                 // construct local/remote addresses
-                inet_ntop(AF_INET6, &tp6->tcp6ConnLocalAddress, lip, sizeof(lip));
-                inet_ntop(AF_INET6, &tp6->tcp6ConnRemAddress, rip, sizeof(rip));
+                inet_ntop(AF_INET6, &tp6->tcp6ConnLocalAddress, lip,
+                          sizeof(lip));
+                inet_ntop(AF_INET6, &tp6->tcp6ConnRemAddress, rip,
+                          sizeof(rip));
                 lport = tp6->tcp6ConnLocalPort;
                 rport = tp6->tcp6ConnRemPort;
 
@@ -1003,7 +1009,8 @@ get_process_connections(PyObject *self, PyObject *args)
             }
         }
 #endif
-        else if (mibhdr->level == MIB2_UDP || mibhdr->level == MIB2_UDP_ENTRY) {
+        else if (mibhdr->level == MIB2_UDP || mibhdr->level == MIB2_UDP_ENTRY)
+        {
             ude = (mib2_udpEntry_t *)databuf.buf;
             num_ent = mibhdr->len / sizeof(mib2_udpEntry_t);
             for (i = 0; i < num_ent; i++, ude++) {
@@ -1029,7 +1036,8 @@ get_process_connections(PyObject *self, PyObject *args)
             }
         }
 #if defined(AF_INET6)
-        else if (mibhdr->level == MIB2_UDP6 || mibhdr->level == MIB2_UDP6_ENTRY) {
+        else if (mibhdr->level == MIB2_UDP6 ||
+                    mibhdr->level == MIB2_UDP6_ENTRY) {
             ude6 = (mib2_udp6Entry_t *)databuf.buf;
             num_ent = mibhdr->len / sizeof(mib2_udp6Entry_t);
             for (i = 0; i < num_ent; i++, ude6++) {
@@ -1097,37 +1105,77 @@ get_boot_time(PyObject *self, PyObject *args)
 
 
 /*
+ * Return the number of physical CPU cores on the system.
+ */
+static PyObject *
+get_num_phys_cpus(PyObject *self, PyObject *args)
+{
+    kstat_ctl_t *kc;
+    kstat_t *ksp;
+    int ncpus = 0;
+
+    kc = kstat_open();
+    if (kc == NULL)
+        goto error;
+    ksp = kstat_lookup(kc, "cpu_info", -1, NULL);
+    if (ksp == NULL)
+        goto error;
+
+    for (ksp = kc->kc_chain; ksp; ksp = ksp->ks_next) {
+        if (strcmp(ksp->ks_module, "cpu_info") != 0)
+            continue;
+        if (kstat_read(kc, ksp, NULL) == NULL)
+            goto error;
+        ncpus += 1;
+    }
+
+    kstat_close(kc);
+    if (ncpus > 0)
+        return Py_BuildValue("i", ncpus);
+    else
+        goto error;
+
+error:
+    // mimic os.cpu_count()
+    if (kc != NULL)
+        kstat_close(kc);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+
+/*
  * define the psutil C module methods and initialize the module.
  */
 static PyMethodDef
 PsutilMethods[] =
 {
     // --- process-related functions
-    {"get_process_basic_info", get_process_basic_info, METH_VARARGS,
+    {"get_proc_basic_info", get_proc_basic_info, METH_VARARGS,
      "Return process ppid, rss, vms, ctime, nice, nthreads, status and tty"},
-    {"get_process_name_and_args", get_process_name_and_args, METH_VARARGS,
+    {"get_proc_name_and_args", get_proc_name_and_args, METH_VARARGS,
      "Return process name and args."},
-    {"get_process_cpu_times", get_process_cpu_times, METH_VARARGS,
+    {"get_proc_cpu_times", get_proc_cpu_times, METH_VARARGS,
      "Return process user and system CPU times."},
-    {"get_process_cred", get_process_cred, METH_VARARGS,
+    {"get_proc_cred", get_proc_cred, METH_VARARGS,
      "Return process uids/gids."},
     {"query_process_thread", query_process_thread, METH_VARARGS,
      "Return info about a process thread"},
-    {"get_process_memory_maps", get_process_memory_maps, METH_VARARGS,
+    {"get_proc_memory_maps", get_proc_memory_maps, METH_VARARGS,
      "Return process memory mappings"},
-    {"get_process_num_ctx_switches", get_process_num_ctx_switches, METH_VARARGS,
+    {"get_proc_num_ctx_switches", get_proc_num_ctx_switches, METH_VARARGS,
      "Return the number of context switches performed by process"},
-    {"get_process_connections", get_process_connections, METH_VARARGS,
+    {"get_proc_connections", get_proc_connections, METH_VARARGS,
      "Return TCP and UDP connections opened by process."},
 
     // --- system-related functions
     {"get_swap_mem", get_swap_mem, METH_VARARGS,
      "Return information about system swap memory."},
-    {"get_system_users", get_system_users, METH_VARARGS,
+    {"get_users", get_users, METH_VARARGS,
      "Return currently connected users."},
     {"get_disk_partitions", get_disk_partitions, METH_VARARGS,
      "Return disk partitions."},
-    {"get_system_per_cpu_times", get_system_per_cpu_times, METH_VARARGS,
+    {"get_sys_per_cpu_times", get_sys_per_cpu_times, METH_VARARGS,
      "Return system per-CPU times."},
     {"get_disk_io_counters", get_disk_io_counters, METH_VARARGS,
      "Return a Python dict of tuples for disk I/O statistics."},
@@ -1135,6 +1183,8 @@ PsutilMethods[] =
      "Return a Python dict of tuples for network I/O statistics."},
     {"get_boot_time", get_boot_time, METH_VARARGS,
      "Return system boot time in seconds since the EPOCH."},
+    {"get_num_phys_cpus", get_num_phys_cpus, METH_VARARGS,
+     "Return the number of physical CPUs on the system."},
 
     {NULL, NULL, 0, NULL}
 };
@@ -1213,8 +1263,10 @@ void init_psutil_sunos(void)
     PyModule_AddIntConstant(module, "TCPS_FIN_WAIT_2", TCPS_FIN_WAIT_2);
     PyModule_AddIntConstant(module, "TCPS_LAST_ACK", TCPS_LAST_ACK);
     PyModule_AddIntConstant(module, "TCPS_TIME_WAIT", TCPS_TIME_WAIT);
-    PyModule_AddIntConstant(module, "TCPS_IDLE", TCPS_IDLE);  // sunos specific
-    PyModule_AddIntConstant(module, "TCPS_BOUND", TCPS_BOUND);  // sunos specific
+    // sunos specific
+    PyModule_AddIntConstant(module, "TCPS_IDLE", TCPS_IDLE);
+    // sunos specific
+    PyModule_AddIntConstant(module, "TCPS_BOUND", TCPS_BOUND);
     PyModule_AddIntConstant(module, "PSUTIL_CONN_NONE", PSUTIL_CONN_NONE);
 
     if (module == NULL) {

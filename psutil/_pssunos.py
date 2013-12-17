@@ -11,13 +11,12 @@ import os
 import socket
 import subprocess
 
-import _psutil_posix
-import _psutil_sunos
-
 from psutil import _psposix
 from psutil._common import *
 from psutil._compat import namedtuple, PY3
 from psutil._error import AccessDenied, NoSuchProcess, TimeoutExpired
+import _psutil_posix
+import _psutil_sunos
 
 
 __extra__all__ = ["CONN_IDLE", "CONN_BOUND"]
@@ -50,16 +49,19 @@ TCP_STATUSES = {
     _psutil_sunos.TCPS_LISTEN: CONN_LISTEN,
     _psutil_sunos.TCPS_CLOSING: CONN_CLOSING,
     _psutil_sunos.PSUTIL_CONN_NONE: CONN_NONE,
-    _psutil_sunos.TCPS_IDLE: CONN_IDLE,  # sunos specific
+    _psutil_sunosTC.ptPS_IDLE: CONN_IDLE,  # sunos specific
     _psutil_sunos.TCPS_BOUND: CONN_BOUND,  # sunos specific
 }
+
+nt_sys_cputimes = namedtuple('cputimes', ['user', 'system', ' idle', 'iowait'])
+
+
+# --- functions
 
 disk_io_counters = _psutil_sunos.get_disk_io_counters
 net_io_counters = _psutil_sunos.get_net_io_counters
 get_disk_usage = _psposix.get_disk_usage
 
-nt_virtmem_info = namedtuple('vmem', ' '.join([
-    'total', 'available', 'percent', 'used', 'free']))  # all platforms
 
 def virtual_memory():
     # we could have done this with kstat, but imho this is good enough
@@ -68,7 +70,7 @@ def virtual_memory():
     free = avail = os.sysconf('SC_AVPHYS_PAGES') * PAGE_SIZE
     used = total - free
     percent = usage_percent(used, total, _round=1)
-    return nt_virtmem_info(total, avail, percent, used, free)
+    return nt_sys_vmem(total, avail, percent, used, free)
 
 
 def swap_memory():
@@ -99,11 +101,11 @@ def swap_memory():
         free += int(int(f) * 1024)
     used = total - free
     percent = usage_percent(used, total, _round=1)
-    return nt_swapmeminfo(total, used, free, percent,
-                          sin * PAGE_SIZE, sout * PAGE_SIZE)
+    return nt_sys_swap(total, used, free, percent,
+                       sin * PAGE_SIZE, sout * PAGE_SIZE)
 
 
-def get_pid_list():
+def get_pids():
     """Returns a list of PIDs currently running on the system."""
     return [int(x) for x in os.listdir('/proc') if x.isdigit()]
 
@@ -113,34 +115,40 @@ def pid_exists(pid):
     return _psposix.pid_exists(pid)
 
 
-_cputimes_ntuple = namedtuple('cputimes', 'user system idle iowait')
-
-def get_system_cpu_times():
+def get_sys_cpu_times():
     """Return system-wide CPU times as a named tuple"""
-    ret = _psutil_sunos.get_system_per_cpu_times()
-    return _cputimes_ntuple(*[sum(x) for x in zip(*ret)])
+    ret = _psutil_sunos.get_sys_per_cpu_times()
+    return nt_sys_cputimes(*[sum(x) for x in zip(*ret)])
 
 
-def get_system_per_cpu_times():
+def get_sys_per_cpu_times():
     """Return system per-CPU times as a list of named tuples"""
-    ret = _psutil_sunos.get_system_per_cpu_times()
+    ret = _psutil_sunos.get_sys_per_cpu_times()
     return [_cputimes_ntuple(*x) for x in ret]
 
 
 def get_num_cpus():
     """Return the number of logical CPUs in the system."""
-    return os.sysconf("SC_NPROCESSORS_ONLN")
+    try:
+        return os.sysconf("SC_NPROCESSORS_ONLN")
+    except ValueError:
+        # mimic os.cpu_count() behavior
+        return None
+
+def get_num_phys_cpus():
+    """Return the number of physical CPUs in the system."""
+    return _psutil_sunos.get_num_phys_cpus()
 
 
-def get_system_boot_time():
+def get_boot_time():
     """The system boot time expressed in seconds since the epoch."""
     return _psutil_sunos.get_boot_time()
 
 
-def get_system_users():
+def get_users():
     """Return currently connected users as a list of namedtuples."""
     retlist = []
-    rawlist = _psutil_sunos.get_system_users()
+    rawlist = _psutil_sunos.get_users()
     localhost = (':0.0', ':0')
     for item in rawlist:
         user, tty, hostname, tstamp, user_process = item
@@ -151,7 +159,7 @@ def get_system_users():
             continue
         if hostname in localhost:
             hostname = 'localhost'
-        nt = nt_user(user, tty, hostname, tstamp)
+        nt = nt_sys_user(user, tty, hostname, tstamp)
         retlist.append(nt)
     return retlist
 
@@ -172,7 +180,7 @@ def disk_partitions(all=False):
             # filter by filesystem having a total size > 0.
             if not get_disk_usage(mountpoint).total:
                 continue
-        ntuple = nt_partition(device, mountpoint, fstype, opts)
+        ntuple = nt_sys_diskpart(device, mountpoint, fstype, opts)
         retlist.append(ntuple)
     return retlist
 
@@ -208,32 +216,32 @@ class Process(object):
         self._process_name = None
 
     @wrap_exceptions
-    def get_process_name(self):
+    def get_name(self):
         # note: max len == 15
-        return _psutil_sunos.get_process_name_and_args(self.pid)[0]
+        return _psutil_sunos.get_proc_name_and_args(self.pid)[0]
 
     @wrap_exceptions
-    def get_process_exe(self):
+    def get_exe(self):
         # Will be guess later from cmdline but we want to explicitly
         # invoke cmdline here in order to get an AccessDenied
         # exception if the user has not enough privileges.
-        self.get_process_cmdline()
+        self.get_proc_cmdline()
         return ""
 
     @wrap_exceptions
-    def get_process_cmdline(self):
-        return _psutil_sunos.get_process_name_and_args(self.pid)[1].split(' ')
+    def get_cmdline(self):
+        return _psutil_sunos.get_proc_name_and_args(self.pid)[1].split(' ')
 
     @wrap_exceptions
-    def get_process_create_time(self):
-        return _psutil_sunos.get_process_basic_info(self.pid)[3]
+    def get_create_time(self):
+        return _psutil_sunos.get_proc_basic_info(self.pid)[3]
 
     @wrap_exceptions
-    def get_process_num_threads(self):
-        return _psutil_sunos.get_process_basic_info(self.pid)[5]
+    def get_num_threads(self):
+        return _psutil_sunos.get_proc_basic_info(self.pid)[5]
 
     @wrap_exceptions
-    def get_process_nice(self):
+    def get_nice(self):
         # For some reason getpriority(3) return ESRCH (no such process)
         # for certain low-pid processes, no matter what (even as root).
         # The process actually exists though, as it has a name,
@@ -251,7 +259,7 @@ class Process(object):
             raise
 
     @wrap_exceptions
-    def set_process_nice(self, value):
+    def set_proc_nice(self, value):
         if self.pid in (2, 3):
             # Special case PIDs: internally setpriority(3) return ESRCH
             # (no such process), no matter what.
@@ -261,31 +269,31 @@ class Process(object):
         return _psutil_posix.setpriority(self.pid, value)
 
     @wrap_exceptions
-    def get_process_ppid(self):
-        return _psutil_sunos.get_process_basic_info(self.pid)[0]
+    def get_ppid(self):
+        return _psutil_sunos.get_proc_basic_info(self.pid)[0]
 
     @wrap_exceptions
-    def get_process_uids(self):
+    def get_uids(self):
         real, effective, saved, _, _, _ = \
-            _psutil_sunos.get_process_cred(self.pid)
-        return nt_uids(real, effective, saved)
+            _psutil_sunos.get_proc_cred(self.pid)
+        return nt_proc_uids(real, effective, saved)
 
     @wrap_exceptions
-    def get_process_gids(self):
+    def get_gids(self):
         _, _, _, real, effective, saved = \
-            _psutil_sunos.get_process_cred(self.pid)
-        return nt_uids(real, effective, saved)
+            _psutil_sunos.get_proc_cred(self.pid)
+        return nt_proc_uids(real, effective, saved)
 
     @wrap_exceptions
     def get_cpu_times(self):
-        user, system = _psutil_sunos.get_process_cpu_times(self.pid)
-        return nt_cputimes(user, system)
+        user, system = _psutil_sunos.get_proc_cpu_times(self.pid)
+        return nt_proc_cpu(user, system)
 
     @wrap_exceptions
-    def get_process_terminal(self):
+    def get_terminal(self):
         hit_enoent = False
         tty = wrap_exceptions(
-            _psutil_sunos.get_process_basic_info(self.pid)[0])
+            _psutil_sunos.get_proc_basic_info(self.pid)[0])
         if tty != _psutil_sunos.PRNODEV:
             for x in (0, 1, 2, 255):
                 try:
@@ -301,7 +309,7 @@ class Process(object):
             os.stat('/proc/%s' % self.pid)
 
     @wrap_exceptions
-    def get_process_cwd(self):
+    def get_cwd(self):
         # /proc/PID/path/cwd may not be resolved by readlink() even if
         # it exists (ls shows it). If that's the case and the process
         # is still alive return None (we can return None also on BSD).
@@ -317,21 +325,21 @@ class Process(object):
 
     @wrap_exceptions
     def get_memory_info(self):
-        ret = _psutil_sunos.get_process_basic_info(self.pid)
+        ret = _psutil_sunos.get_proc_basic_info(self.pid)
         rss, vms = ret[1] * 1024, ret[2] * 1024
-        return nt_meminfo(rss, vms)
+        return nt_proc_mem(rss, vms)
 
     # it seems Solaris uses rss and vms only
     get_ext_memory_info = get_memory_info
 
     @wrap_exceptions
-    def get_process_status(self):
-        code = _psutil_sunos.get_process_basic_info(self.pid)[6]
+    def get_status(self):
+        code = _psutil_sunos.get_proc_basic_info(self.pid)[6]
         # XXX is '?' legit? (we're not supposed to return it anyway)
         return PROC_STATUSES.get(code, '?')
 
     @wrap_exceptions
-    def get_process_threads(self):
+    def get_threads(self):
         ret = []
         tids = os.listdir('/proc/%d/lwp' % self.pid)
         hit_enoent = False
@@ -348,7 +356,7 @@ class Process(object):
                     continue
                 raise
             else:
-                nt = nt_thread(tid, utime, stime)
+                nt = nt_proc_thread(tid, utime, stime)
                 ret.append(nt)
         if hit_enoent:
             # raise NSP if the process disappeared on us
@@ -374,7 +382,7 @@ class Process(object):
                     raise
                 else:
                     if isfile_strict(file):
-                        retlist.append(nt_openfile(file, int(fd)))
+                        retlist.append(nt_proc_file(file, int(fd)))
         if hit_enoent:
             # raise NSP if the process disappeared on us
             os.stat('/proc/%s' % self.pid)
@@ -418,7 +426,7 @@ class Process(object):
             raise ValueError("invalid %r kind argument; choose between %s"
                              % (kind, ', '.join([repr(x) for x in conn_tmap])))
         families, types = conn_tmap[kind]
-        rawlist = _psutil_sunos.get_process_connections(
+        rawlist = _psutil_sunos.get_proc_connections(
             self.pid, families, types)
         # The underlying C implementation retrieves all OS connections
         # and filters them by PID.  At this point we can't tell whether
@@ -436,12 +444,12 @@ class Process(object):
             if type not in types:
                 continue
             status = TCP_STATUSES[status]
-            nt = nt_connection(fd, fam, type, laddr, raddr, status)
+            nt = nt_proc_conn(fd, fam, type, laddr, raddr, status)
             ret.append(nt)
 
         # UNIX sockets
         if socket.AF_UNIX in families:
-            ret.extend([nt_connection(*conn) for conn in
+            ret.extend([nt_proc_conn(*conn) for conn in
                         self._get_unix_sockets(self.pid)])
         return ret
 
@@ -455,7 +463,7 @@ class Process(object):
                               hex(end)[2:].strip('L'))
 
         retlist = []
-        rawlist = _psutil_sunos.get_process_memory_maps(self.pid)
+        rawlist = _psutil_sunos.get_proc_memory_maps(self.pid)
         hit_enoent = False
         for item in rawlist:
             addr, addrsize, perm, name, rss, anon, locked = item
@@ -488,7 +496,8 @@ class Process(object):
 
     @wrap_exceptions
     def get_num_ctx_switches(self):
-        return nt_ctxsw(*_psutil_sunos.get_process_num_ctx_switches(self.pid))
+        return nt_proc_ctxsw(
+            *_psutil_sunos.get_proc_num_ctx_switches(self.pid))
 
     @wrap_exceptions
     def process_wait(self, timeout=None):

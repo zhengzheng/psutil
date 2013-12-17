@@ -10,13 +10,13 @@ import errno
 import os
 import sys
 
-import _psutil_osx
-import _psutil_posix
-
 from psutil import _psposix
 from psutil._common import *
 from psutil._compat import namedtuple, wraps
 from psutil._error import AccessDenied, NoSuchProcess, TimeoutExpired
+import _psutil_osx
+import _psutil_posix
+
 
 __extra__all__ = []
 
@@ -48,16 +48,17 @@ PROC_STATUSES = {
     _psutil_osx.SZOMB: STATUS_ZOMBIE,
 }
 
+# extend base mem ntuple with OSX-specific memory metrics
+nt_sys_vmem = namedtuple(
+    nt_sys_vmem.__name__,
+    list(nt_sys_vmem._fields) + ['active', 'inactive', 'wired'])
+
+nt_sys_cputimes = namedtuple('cputimes', ['user', 'nice', 'system', 'idle'])
+
+nt_proc_extmem = namedtuple('meminfo', ['rss', 'vms', 'pfaults', 'pageins'])
+
 
 # --- functions
-
-nt_virtmem_info = namedtuple('vmem', ' '.join([
-    # all platforms
-    'total', 'available', 'percent', 'used', 'free',
-    # OSX specific
-    'active',
-    'inactive',
-    'wired']))
 
 def virtual_memory():
     """System virtual memory as a namedtuple."""
@@ -65,29 +66,27 @@ def virtual_memory():
     avail = inactive + free
     used = active + inactive + wired
     percent = usage_percent((total - avail), total, _round=1)
-    return nt_virtmem_info(total, avail, percent, used, free,
-                           active, inactive, wired)
+    return nt_sys_vmem(total, avail, percent, used, free,
+                       active, inactive, wired)
 
 
 def swap_memory():
     """Swap system memory as a (total, used, free, sin, sout) tuple."""
     total, used, free, sin, sout = _psutil_osx.get_swap_mem()
     percent = usage_percent(used, total, _round=1)
-    return nt_swapmeminfo(total, used, free, percent, sin, sout)
+    return nt_sys_swap(total, used, free, percent, sin, sout)
 
 
-_cputimes_ntuple = namedtuple('cputimes', 'user nice system idle')
-
-def get_system_cpu_times():
+def get_sys_cpu_times():
     """Return system CPU times as a namedtuple."""
-    user, nice, system, idle = _psutil_osx.get_system_cpu_times()
-    return _cputimes_ntuple(user, nice, system, idle)
+    user, nice, system, idle = _psutil_osx.get_sys_cpu_times()
+    return nt_sys_cputimes(user, nice, system, idle)
 
 
-def get_system_per_cpu_times():
+def get_sys_per_cpu_times():
     """Return system CPU times as a named tuple"""
     ret = []
-    for cpu_t in _psutil_osx.get_system_per_cpu_times():
+    for cpu_t in _psutil_osx.get_sys_per_cpu_times():
         user, nice, system, idle = cpu_t
         item = _cputimes_ntuple(user, nice, system, idle)
         ret.append(item)
@@ -99,9 +98,14 @@ def get_num_cpus():
     return _psutil_osx.get_num_cpus()
 
 
-def get_system_boot_time():
+def get_num_phys_cpus():
+    """Return the number of physical CPUs in the system."""
+    return _psutil_osx.get_num_phys_cpus()
+
+
+def get_boot_time():
     """The system boot time expressed in seconds since the epoch."""
-    return _psutil_osx.get_system_boot_time()
+    return _psutil_osx.get_boot_time()
 
 
 def disk_partitions(all=False):
@@ -114,26 +118,26 @@ def disk_partitions(all=False):
         if not all:
             if not os.path.isabs(device) or not os.path.exists(device):
                 continue
-        ntuple = nt_partition(device, mountpoint, fstype, opts)
+        ntuple = nt_sys_diskpart(device, mountpoint, fstype, opts)
         retlist.append(ntuple)
     return retlist
 
 
-def get_system_users():
+def get_users():
     retlist = []
-    rawlist = _psutil_osx.get_system_users()
+    rawlist = _psutil_osx.get_users()
     for item in rawlist:
         user, tty, hostname, tstamp = item
         if tty == '~':
             continue  # reboot or shutdown
         if not tstamp:
             continue
-        nt = nt_user(user, tty or None, hostname or None, tstamp)
+        nt = nt_sys_user(user, tty or None, hostname or None, tstamp)
         retlist.append(nt)
     return retlist
 
 
-get_pid_list = _psutil_osx.get_pid_list
+get_pids = _psutil_osx.get_pids
 pid_exists = _psposix.pid_exists
 get_disk_usage = _psposix.get_disk_usage
 net_io_counters = _psutil_osx.get_net_io_counters
@@ -168,43 +172,43 @@ class Process(object):
         self._process_name = None
 
     @wrap_exceptions
-    def get_process_name(self):
+    def get_name(self):
         """Return process name as a string of limited len (15)."""
-        return _psutil_osx.get_process_name(self.pid)
+        return _psutil_osx.get_proc_name(self.pid)
 
     @wrap_exceptions
-    def get_process_exe(self):
-        return _psutil_osx.get_process_exe(self.pid)
+    def get_exe(self):
+        return _psutil_osx.get_proc_exe(self.pid)
 
     @wrap_exceptions
-    def get_process_cmdline(self):
+    def get_cmdline(self):
         """Return process cmdline as a list of arguments."""
         if not pid_exists(self.pid):
             raise NoSuchProcess(self.pid, self._process_name)
-        return _psutil_osx.get_process_cmdline(self.pid)
+        return _psutil_osx.get_proc_cmdline(self.pid)
 
     @wrap_exceptions
-    def get_process_ppid(self):
+    def get_ppid(self):
         """Return process parent pid."""
-        return _psutil_osx.get_process_ppid(self.pid)
+        return _psutil_osx.get_proc_ppid(self.pid)
 
     @wrap_exceptions
-    def get_process_cwd(self):
-        return _psutil_osx.get_process_cwd(self.pid)
+    def get_cwd(self):
+        return _psutil_osx.get_proc_cwd(self.pid)
 
     @wrap_exceptions
-    def get_process_uids(self):
-        real, effective, saved = _psutil_osx.get_process_uids(self.pid)
-        return nt_uids(real, effective, saved)
+    def get_uids(self):
+        real, effective, saved = _psutil_osx.get_proc_uids(self.pid)
+        return nt_proc_uids(real, effective, saved)
 
     @wrap_exceptions
-    def get_process_gids(self):
-        real, effective, saved = _psutil_osx.get_process_gids(self.pid)
-        return nt_gids(real, effective, saved)
+    def get_gids(self):
+        real, effective, saved = _psutil_osx.get_proc_gids(self.pid)
+        return nt_proc_gids(real, effective, saved)
 
     @wrap_exceptions
-    def get_process_terminal(self):
-        tty_nr = _psutil_osx.get_process_tty_nr(self.pid)
+    def get_terminal(self):
+        tty_nr = _psutil_osx.get_proc_tty_nr(self.pid)
         tmap = _psposix._get_terminal_map()
         try:
             return tmap[tty_nr]
@@ -214,39 +218,37 @@ class Process(object):
     @wrap_exceptions
     def get_memory_info(self):
         """Return a tuple with the process' RSS and VMS size."""
-        rss, vms = _psutil_osx.get_process_memory_info(self.pid)[:2]
-        return nt_meminfo(rss, vms)
-
-    _nt_ext_mem = namedtuple('meminfo', 'rss vms pfaults pageins')
+        rss, vms = _psutil_osx.get_proc_memory_info(self.pid)[:2]
+        return nt_proc_mem(rss, vms)
 
     @wrap_exceptions
     def get_ext_memory_info(self):
         """Return a tuple with the process' RSS and VMS size."""
         rss, vms, pfaults, pageins = \
-            _psutil_osx.get_process_memory_info(self.pid)
-        return self._nt_ext_mem(rss, vms,
-                                pfaults * PAGESIZE,
-                                pageins * PAGESIZE)
+            _psutil_osx.get_proc_memory_info(self.pid)
+        return nt_proc_extmem(rss, vms,
+                              pfaults * PAGESIZE,
+                              pageins * PAGESIZE)
 
     @wrap_exceptions
     def get_cpu_times(self):
-        user, system = _psutil_osx.get_process_cpu_times(self.pid)
-        return nt_cputimes(user, system)
+        user, system = _psutil_osx.get_proc_cpu_times(self.pid)
+        return nt_proc_cpu(user, system)
 
     @wrap_exceptions
-    def get_process_create_time(self):
+    def get_create_time(self):
         """Return the start time of the process as a number of seconds since
         the epoch."""
-        return _psutil_osx.get_process_create_time(self.pid)
+        return _psutil_osx.get_proc_create_time(self.pid)
 
     @wrap_exceptions
     def get_num_ctx_switches(self):
-        return nt_ctxsw(*_psutil_osx.get_process_num_ctx_switches(self.pid))
+        return nt_proc_ctxsw(*_psutil_osx.get_proc_num_ctx_switches(self.pid))
 
     @wrap_exceptions
-    def get_process_num_threads(self):
+    def get_num_threads(self):
         """Return the number of threads belonging to the process."""
-        return _psutil_osx.get_process_num_threads(self.pid)
+        return _psutil_osx.get_proc_num_threads(self.pid)
 
     @wrap_exceptions
     def get_open_files(self):
@@ -254,10 +256,10 @@ class Process(object):
         if self.pid == 0:
             return []
         files = []
-        rawlist = _psutil_osx.get_process_open_files(self.pid)
+        rawlist = _psutil_osx.get_proc_open_files(self.pid)
         for path, fd in rawlist:
             if isfile_strict(path):
-                ntuple = nt_openfile(path, fd)
+                ntuple = nt_proc_file(path, fd)
                 files.append(ntuple)
         return files
 
@@ -270,13 +272,13 @@ class Process(object):
             raise ValueError("invalid %r kind argument; choose between %s"
                              % (kind, ', '.join([repr(x) for x in conn_tmap])))
         families, types = conn_tmap[kind]
-        rawlist = _psutil_osx.get_process_connections(self.pid, families,
-                                                      types)
+        rawlist = _psutil_osx.get_proc_connections(self.pid, families,
+                                                   types)
         ret = []
         for item in rawlist:
             fd, fam, type, laddr, raddr, status = item
             status = TCP_STATUSES[status]
-            nt = nt_connection(fd, fam, type, laddr, raddr, status)
+            nt = nt_proc_conn(fd, fam, type, laddr, raddr, status)
             ret.append(nt)
         return ret
 
@@ -284,7 +286,7 @@ class Process(object):
     def get_num_fds(self):
         if self.pid == 0:
             return 0
-        return _psutil_osx.get_process_num_fds(self.pid)
+        return _psutil_osx.get_proc_num_fds(self.pid)
 
     @wrap_exceptions
     def process_wait(self, timeout=None):
@@ -294,26 +296,26 @@ class Process(object):
             raise TimeoutExpired(self.pid, self._process_name)
 
     @wrap_exceptions
-    def get_process_nice(self):
+    def get_nice(self):
         return _psutil_posix.getpriority(self.pid)
 
     @wrap_exceptions
-    def set_process_nice(self, value):
+    def set_proc_nice(self, value):
         return _psutil_posix.setpriority(self.pid, value)
 
     @wrap_exceptions
-    def get_process_status(self):
-        code = _psutil_osx.get_process_status(self.pid)
+    def get_status(self):
+        code = _psutil_osx.get_proc_status(self.pid)
         # XXX is '?' legit? (we're not supposed to return it anyway)
         return PROC_STATUSES.get(code, '?')
 
     @wrap_exceptions
-    def get_process_threads(self):
+    def get_threads(self):
         """Return the number of threads belonging to the process."""
-        rawlist = _psutil_osx.get_process_threads(self.pid)
+        rawlist = _psutil_osx.get_proc_threads(self.pid)
         retlist = []
         for thread_id, utime, stime in rawlist:
-            ntuple = nt_thread(thread_id, utime, stime)
+            ntuple = nt_proc_thread(thread_id, utime, stime)
             retlist.append(ntuple)
         return retlist
 
@@ -326,4 +328,4 @@ class Process(object):
 
     @wrap_exceptions
     def get_memory_maps(self):
-        return _psutil_osx.get_process_memory_maps(self.pid)
+        return _psutil_osx.get_proc_memory_maps(self.pid)

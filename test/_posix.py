@@ -152,7 +152,7 @@ class PosixSpecificTestCase(unittest.TestCase):
                 pids_ps.append(pid)
         # remove ps subprocess pid which is supposed to be dead in meantime
         pids_ps.remove(p.pid)
-        pids_psutil = psutil.get_pid_list()
+        pids_psutil = psutil.get_pids()
         pids_ps.sort()
         pids_psutil.sort()
 
@@ -208,7 +208,8 @@ class PosixSpecificTestCase(unittest.TestCase):
         p = psutil.Process(os.getpid())
         failures = []
         ignored_names = ('terminate', 'kill', 'suspend', 'resume', 'nice',
-                         'send_signal', 'wait', 'get_children', 'as_dict')
+                         'send_signal', 'wait', 'get_children', 'as_dict',
+                         'getcwd')
         for name in dir(psutil.Process):
             if (name.startswith('_')
                     or name.startswith('set_')

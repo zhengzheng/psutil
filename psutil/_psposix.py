@@ -12,15 +12,14 @@ import os
 import sys
 import time
 
-from psutil._common import nt_diskinfo, usage_percent, memoize
+from psutil._common import nt_sys_diskusage, usage_percent, memoize
 from psutil._compat import PY3, unicode
 from psutil._error import TimeoutExpired
 
 
 def pid_exists(pid):
     """Check whether pid exists in the current process table."""
-    if pid < 0:
-        return False
+    assert not pid <= 0, pid
     try:
         os.kill(pid, 0)
     except OSError:
@@ -33,7 +32,7 @@ def pid_exists(pid):
             return True
         else:
             # According to "man 2 kill" possible error values are
-            # (EINVAL, EPERM, ESRCH) therefore we should bever get
+            # (EINVAL, EPERM, ESRCH) therefore we should never get
             # here. If we do let's be explicit in considering this
             # an error.
             raise err
@@ -131,7 +130,7 @@ def get_disk_usage(path):
     # NB: the percentage is -5% than what shown by df due to
     # reserved blocks that we are currently not considering:
     # http://goo.gl/sWGbH
-    return nt_diskinfo(total, used, free, percent)
+    return nt_sys_diskusage(total, used, free, percent)
 
 
 @memoize

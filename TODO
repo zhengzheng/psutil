@@ -61,6 +61,9 @@ LOWER PRIORITY
 DEBATABLE
 =========
 
+ * advanced cmdline interface exposing the whole API and providing different
+   kind of outputs (e.g. pprinted, colorized, json).
+
  * [Linux]: process cgroups (http://en.wikipedia.org/wiki/Cgroups). They look
    similar to prlimit() in terms of functionality but uglier (they should allow
    limiting per-process network IO resources though, which is great). Needs
@@ -131,16 +134,15 @@ Removals:
 Renames:
 
  * (S) rename/unify all _ps*.py process functions
- * (S) _psmswindows.py         -> _pswindows.py
- * (S) _psutil_mswindows.c     -> _psutil_windows.c
- * (S) _psutil_mswindows.h     -> _psutil_windows.h
- * (H) psutil.get_pid_list()   -> psutil.get_pids()
  * (H) psutil.Process.ppid     -> get_ppid()
  * (H) psutil.Process.status   -> get_status()
  * (H) psutil.Process.uids     -> get_uids()
  * (H) psutil.Process.gids     -> get_gids()
  * (H) psutil.Process.username -> get_username()
- * (H) psutil.Process.getcwd   -> get_cwd()
+
+ Others:
+
+  * (M) make *cpu_percent's 'default' parameter default to 0.
 
 
 REJECTED IDEAS
