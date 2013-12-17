@@ -45,7 +45,7 @@ int HasSystemPrivilege(HANDLE hProcess) {
     DWORD dwRetval = 0;
     TCHAR privName[256];
     DWORD dwNameSize = 256;
-    //PTOKEN_PRIVILEGES tp = NULL;
+    // PTOKEN_PRIVILEGES tp = NULL;
     BYTE *pBuffer = NULL;
     TOKEN_PRIVILEGES *tp = NULL;
     HANDLE hToken = token_from_handle(hProcess);
@@ -65,7 +65,7 @@ int HasSystemPrivilege(HANDLE hProcess) {
     }
 
     // allocate buffer and call GetTokenInformation again
-    //tp = (PTOKEN_PRIVILEGES) GlobalAlloc(GPTR, dwSize);
+    // tp = (PTOKEN_PRIVILEGES) GlobalAlloc(GPTR, dwSize);
     pBuffer = (BYTE *) malloc(dwSize);
     if (pBuffer == NULL) {
         PyErr_NoMemory();
@@ -103,8 +103,7 @@ int HasSystemPrivilege(HANDLE hProcess) {
             free(pBuffer);
             return 1;
         }
-
-    } //for
+    }
 
     free(pBuffer);
     return 0;
@@ -212,7 +211,6 @@ int UnsetSeDebug()
        ) {
         if (GetLastError() == ERROR_NO_TOKEN) {
             if (! ImpersonateSelf(SecurityImpersonation)) {
-                //Log2File("Error setting impersonation! [UnsetSeDebug()]", L_DEBUG);
                 return 0;
             }
 
@@ -220,16 +218,15 @@ int UnsetSeDebug()
                                  TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
                                  FALSE,
                                  &hToken)
-               ) {
-                //Log2File("Error Opening Thread Token! [UnsetSeDebug()]", L_DEBUG);
+               )
+            {
                 return 0;
             }
         }
     }
 
-    //now disable SeDebug
+    // now disable SeDebug
     if (! SetPrivilege(hToken, SE_DEBUG_NAME, FALSE)) {
-        //Log2File("Error unsetting SeDebug Privilege [SetPrivilege()]", L_WARN);
         return 0;
     }
 

@@ -28,7 +28,7 @@ HANDLE
 psutil_handle_from_pid_waccess(DWORD pid, DWORD dwDesiredAccess)
 {
     HANDLE hProcess;
-    DWORD  processExitCode = 0;
+    DWORD processExitCode = 0;
 
     if (pid == 0) {
         // otherwise we'd get NoSuchProcess
@@ -46,7 +46,7 @@ psutil_handle_from_pid_waccess(DWORD pid, DWORD dwDesiredAccess)
         return NULL;
     }
 
-    /* make sure the process is running */
+    // make sure the process is running
     GetExitCodeProcess(hProcess, &processExitCode);
     if (processExitCode == 0) {
         NoSuchProcess();
@@ -85,10 +85,10 @@ psutil_get_peb_address(HANDLE ProcessHandle)
 
 DWORD *
 psutil_get_pids(DWORD *numberOfReturnedPIDs) {
-    /* Win32 SDK says the only way to know if our process array
-     * wasn't large enough is to check the returned size and make
-     * sure that it doesn't match the size of the array.
-     * If it does we allocate a larger array and try again */
+    // Win32 SDK says the only way to know if our process array
+    // wasn't large enough is to check the returned size and make
+    // sure that it doesn't match the size of the array.
+    // If it does we allocate a larger array and try again
 
     // Stores the actual array
     DWORD *procArray = NULL;
@@ -161,7 +161,8 @@ psutil_pid_is_running(DWORD pid)
         return (exitCode == STILL_ACTIVE);
     }
 
-    // access denied means there's a process there so we'll assume it's running
+    // access denied means there's a process there so we'll assume
+    // it's running
     if (GetLastError() == ERROR_ACCESS_DENIED) {
         CloseHandle(hProcess);
         return 1;
@@ -240,7 +241,7 @@ psutil_get_arg_list(long pid)
 
     pebAddress = psutil_get_peb_address(hProcess);
 
-    /* get the address of ProcessParameters */
+    // get the address of ProcessParameters
 #ifdef _WIN64
     if (!ReadProcessMemory(hProcess, (PCHAR)pebAddress + 32,
                            &rtlUserProcParamsAddress, sizeof(PVOID), NULL))
@@ -254,7 +255,7 @@ psutil_get_arg_list(long pid)
         goto error;
     }
 
-    /* read the CommandLine UNICODE_STRING structure */
+    // read the CommandLine UNICODE_STRING structure
 #ifdef _WIN64
     if (!ReadProcessMemory(hProcess, (PCHAR)rtlUserProcParamsAddress + 112,
                            &commandLine, sizeof(commandLine), NULL))
@@ -263,37 +264,33 @@ psutil_get_arg_list(long pid)
                            &commandLine, sizeof(commandLine), NULL))
 #endif
     {
-        ////printf("Could not read CommandLine!\n");
         PyErr_SetFromWindowsErr(0);
         goto error;
     }
 
 
-    /* allocate memory to hold the command line */
+    // allocate memory to hold the command line
     commandLineContents = (WCHAR *)malloc(commandLine.Length + 1);
     if (commandLineContents == NULL) {
         PyErr_NoMemory();
         goto error;
     }
 
-    /* read the command line */
+    // read the command line
     if (!ReadProcessMemory(hProcess, commandLine.Buffer,
                            commandLineContents, commandLine.Length, NULL))
     {
-        ////printf("Could not read the command line string!\n");
         PyErr_SetFromWindowsErr(0);
         goto error;
     }
 
-    /* print the commandline */
-    ////printf("%.*S\n", commandLine.Length / 2, commandLineContents);
-
-    // null-terminate the string to prevent wcslen from returning incorrect length
-    // the length specifier is in characters, but commandLine.Length is in bytes
+    // Null-terminate the string to prevent wcslen from returning
+    // incorrect length the length specifier is in characters, but
+    // commandLine.Length is in bytes.
     commandLineContents[(commandLine.Length / sizeof(WCHAR))] = '\0';
 
-    // attemempt tp parse the command line using Win32 API, fall back on string
-    // cmdline version otherwise
+    // attempt tp parse the command line using Win32 API, fall back
+    // on string cmdline version otherwise
     szArglist = CommandLineToArgvW(commandLineContents, &nArgs);
     if (NULL == szArglist) {
         // failed to parse arglist
@@ -311,19 +308,16 @@ psutil_get_arg_list(long pid)
             goto error;
     }
     else {
-        // arglist parsed as array of UNICODE_STRING, so convert each to Python
-        // string object and add to arg list
+        // arglist parsed as array of UNICODE_STRING, so convert each to
+        // Python string object and add to arg list
         argList = Py_BuildValue("[]");
         if (argList == NULL)
             goto error;
         for (i = 0; i < nArgs; i++) {
             arg_from_wchar = NULL;
             arg = NULL;
-            ////printf("%d: %.*S (%d characters)\n", i, wcslen(szArglist[i]),
-            //                  szArglist[i], wcslen(szArglist[i]));
             arg_from_wchar = PyUnicode_FromWideChar(szArglist[i],
-                                                    wcslen(szArglist[i])
-                                                   );
+                                                    wcslen(szArglist[i]));
             if (arg_from_wchar == NULL)
                 goto error;
 #if PY_MAJOR_VERSION >= 3
@@ -376,7 +370,8 @@ const STATUS_BUFFER_TOO_SMALL = 0xC0000023L;
  * On success return 1, else 0 with Python exception already set.
  */
 int
-get_process_info(DWORD pid, PSYSTEM_PROCESS_INFORMATION *retProcess, PVOID *retBuffer)
+get_proc_info(DWORD pid, PSYSTEM_PROCESS_INFORMATION *retProcess,
+                 PVOID *retBuffer)
 {
     static ULONG initialBufferSize = 0x4000;
     NTSTATUS status;
@@ -403,7 +398,8 @@ get_process_info(DWORD pid, PSYSTEM_PROCESS_INFORMATION *retProcess, PVOID *retB
         status = NtQuerySystemInformation(SystemProcessInformation, buffer,
                                           bufferSize, &bufferSize);
 
-        if (status == STATUS_BUFFER_TOO_SMALL || status == STATUS_INFO_LENGTH_MISMATCH)
+        if (status == STATUS_BUFFER_TOO_SMALL ||
+                status == STATUS_INFO_LENGTH_MISMATCH)
         {
             free(buffer);
             buffer = malloc(bufferSize);

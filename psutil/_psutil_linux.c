@@ -6,7 +6,6 @@
  * Linux-specific functions.
  */
 
-
 #ifndef _GNU_SOURCE
     #define _GNU_SOURCE 1
 #endif
@@ -57,12 +56,12 @@ ioprio_set(int which, int who, int ioprio)
     return syscall(__NR_ioprio_set, which, who, ioprio);
 }
 
-#define IOPRIO_CLASS_SHIFT  13
-#define IOPRIO_PRIO_MASK  ((1UL << IOPRIO_CLASS_SHIFT) - 1)
+#define IOPRIO_CLASS_SHIFT 13
+#define IOPRIO_PRIO_MASK ((1UL << IOPRIO_CLASS_SHIFT) - 1)
 
-#define IOPRIO_PRIO_CLASS(mask)  ((mask) >> IOPRIO_CLASS_SHIFT)
-#define IOPRIO_PRIO_DATA(mask)  ((mask) & IOPRIO_PRIO_MASK)
-#define IOPRIO_PRIO_VALUE(class, data)  (((class) << IOPRIO_CLASS_SHIFT) | data)
+#define IOPRIO_PRIO_CLASS(mask) ((mask) >> IOPRIO_CLASS_SHIFT)
+#define IOPRIO_PRIO_DATA(mask) ((mask) & IOPRIO_PRIO_MASK)
+#define IOPRIO_PRIO_VALUE(class, data) (((class) << IOPRIO_CLASS_SHIFT) | data)
 
 
 /*
@@ -254,7 +253,7 @@ get_sysinfo(PyObject *self, PyObject *args)
  * Return process CPU affinity as a Python long (the bitmask)
  */
 static PyObject *
-get_process_cpu_affinity(PyObject *self, PyObject *args)
+get_proc_cpu_affinity(PyObject *self, PyObject *args)
 {
     unsigned long mask;
     unsigned int len = sizeof(mask);
@@ -274,7 +273,7 @@ get_process_cpu_affinity(PyObject *self, PyObject *args)
  * Set process CPU affinity; expects a bitmask
  */
 static PyObject *
-set_process_cpu_affinity(PyObject *self, PyObject *args)
+set_proc_cpu_affinity(PyObject *self, PyObject *args)
 {
     cpu_set_t cpu_set;
     size_t len;
@@ -335,7 +334,7 @@ error:
  * Return currently connected users as a list of tuples.
  */
 static PyObject *
-get_system_users(PyObject *self, PyObject *args)
+get_users(PyObject *self, PyObject *args)
 {
     PyObject *ret_list = PyList_New(0);
     PyObject *tuple = NULL;
@@ -395,7 +394,7 @@ PsutilMethods[] =
     {"prlimit", linux_prlimit, METH_VARARGS,
      "Get or set process resource limits."},
 #endif
-    {"set_process_cpu_affinity", set_process_cpu_affinity, METH_VARARGS,
+    {"set_proc_cpu_affinity", set_proc_cpu_affinity, METH_VARARGS,
      "Set process CPU affinity; expects a bitmask."},
 
     // --- system related functions
@@ -404,9 +403,9 @@ PsutilMethods[] =
      "device, mount point and filesystem type"},
     {"get_sysinfo", get_sysinfo, METH_VARARGS,
      "A wrapper around sysinfo(), return system memory usage statistics"},
-    {"get_process_cpu_affinity", get_process_cpu_affinity, METH_VARARGS,
+    {"get_proc_cpu_affinity", get_proc_cpu_affinity, METH_VARARGS,
      "Return process CPU affinity as a Python long (the bitmask)."},
-    {"get_system_users", get_system_users, METH_VARARGS,
+    {"get_users", get_users, METH_VARARGS,
      "Return currently connected users as a list of tuples"},
 
     {NULL, NULL, 0, NULL}

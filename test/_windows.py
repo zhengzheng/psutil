@@ -16,12 +16,6 @@ import time
 import traceback
 import unittest
 
-import _psutil_mswindows
-import psutil
-from psutil._compat import PY3, callable, long
-from psutil._psmswindows import ACCESS_DENIED_SET
-from test_psutil import *
-
 try:
     import wmi
 except ImportError:
@@ -35,6 +29,12 @@ except ImportError:
     err = sys.exc_info()[1]
     register_warning("Couldn't run pywin32 tests: %s" % str(err))
     win32api = None
+
+from psutil._compat import PY3, callable, long
+from psutil._pswindows import ACCESS_DENIED_SET
+from test_psutil import *
+import _psutil_windows
+import psutil
 
 
 def wrap_exceptions(callable):
@@ -189,7 +189,7 @@ class WindowsSpecificTestCase(unittest.TestCase):
             w = wmi.WMI().Win32_Process()
             wmi_pids = [x.ProcessId for x in w]
             wmi_pids.sort()
-            psutil_pids = psutil.get_pid_list()
+            psutil_pids = psutil.get_pids()
             psutil_pids.sort()
             if wmi_pids != psutil_pids:
                 difference = \
@@ -278,11 +278,11 @@ class WindowsSpecificTestCase(unittest.TestCase):
 class TestDualProcessImplementation(unittest.TestCase):
     fun_names = [
         # function name, tolerance
-        ('get_process_cpu_times', 0.2),
-        ('get_process_create_time', 0.5),
-        ('get_process_num_handles', 1),  # 1 because impl #1 opens a handle
-        ('get_process_io_counters', 0),
-        ('get_process_memory_info', 1024),  # KB
+        ('get_proc_cpu_times', 0.2),
+        ('get_proc_create_time', 0.5),
+        ('get_proc_num_handles', 1),  # 1 because impl #1 opens a handle
+        ('get_proc_io_counters', 0),
+        ('get_proc_memory_info', 1024),  # KB
     ]
 
     def test_compare_values(self):
@@ -316,10 +316,10 @@ class TestDualProcessImplementation(unittest.TestCase):
 
         failures = []
         for name, tolerance in self.fun_names:
-            meth1 = wrap_exceptions(getattr(_psutil_mswindows, name))
-            meth2 = wrap_exceptions(getattr(_psutil_mswindows, name + '_2'))
+            meth1 = wrap_exceptions(getattr(_psutil_windows, name))
+            meth2 = wrap_exceptions(getattr(_psutil_windows, name + '_2'))
             for p in psutil.process_iter():
-                if name == 'get_process_memory_info' and p.pid == os.getpid():
+                if name == 'get_proc_memory_info' and p.pid == os.getpid():
                     continue
                 #
                 try:
@@ -356,9 +356,9 @@ class TestDualProcessImplementation(unittest.TestCase):
     def test_zombies(self):
         # test that NPS is raised by the 2nd implementation in case a
         # process no longer exists
-        ZOMBIE_PID = max(psutil.get_pid_list()) + 5000
+        ZOMBIE_PID = max(psutil.get_pids()) + 5000
         for name, _ in self.fun_names:
-            meth = wrap_exceptions(getattr(_psutil_mswindows, name))
+            meth = wrap_exceptions(getattr(_psutil_windows, name))
             self.assertRaises(psutil.NoSuchProcess, meth, ZOMBIE_PID)
 
 
