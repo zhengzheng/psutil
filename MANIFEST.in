@@ -1,0 +1,11 @@
+include CREDITS
+include HISTORY
+include LICENSE
+include Makefile
+include MANIFEST.in
+include README
+include setup.py
+include TODO
+recursive-include psutil *.py *.c *.h
+recursive-include test *.py README
+recursive-include examples *.py
