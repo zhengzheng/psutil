@@ -19,12 +19,7 @@ import warnings
 
 from psutil import _common
 from psutil import _psposix
-from psutil._common import (isfile_strict, usage_percent, deprecated, memoize)
-from psutil._common import (nt_proc_conn, nt_proc_cpu, nt_proc_ctxsw,
-                            nt_proc_file, nt_proc_gids, nt_proc_io,
-                            nt_proc_ionice, nt_proc_mem, nt_proc_thread,
-                            nt_proc_uids, nt_sys_diskpart, nt_sys_swap,
-                            nt_sys_user, nt_sys_vmem)
+from psutil._common import (isfile_strict, usage_percent, deprecated)
 from psutil._compat import PY3, xrange, namedtuple, wraps
 from psutil._error import AccessDenied, NoSuchProcess, TimeoutExpired
 import _psutil_linux as cext
@@ -93,12 +88,49 @@ TCP_STATUSES = {
     "0B": _common.CONN_CLOSING
 }
 
-nt_sys_vmem = namedtuple(
-    nt_sys_vmem.__name__,
-    list(nt_sys_vmem._fields) + ['active', 'inactive', 'buffers', 'cached'])
 
-nt_proc_extmem = namedtuple(
-    'extmem', ['rss', 'vms', 'shared', 'text', 'lib', 'data', 'dirty'])
+# --- named tuples
+
+def _get_cputimes_fields():
+    """Return a namedtuple of variable fields depending on the
+    CPU times available on this Linux kernel version which may be:
+    (user, nice, system, idle, iowait, irq, softirq, [steal, [guest,
+     [guest_nice]]])
+    """
+    f = open('/proc/stat', 'r')
+    try:
+        values = f.readline().split()[1:]
+    finally:
+        f.close()
+    fields = ['user', 'nice', 'system', 'idle', 'iowait', 'irq', 'softirq']
+    vlen = len(values)
+    if vlen >= 8:
+        # Linux >= 2.6.11
+        fields.append('steal')
+    if vlen >= 9:
+        # Linux >= 2.6.24
+        fields.append('guest')
+    if vlen >= 10:
+        # Linux >= 3.2.0
+        fields.append('guest_nice')
+    return fields
+
+
+scputimes = namedtuple('scputimes', _get_cputimes_fields())
+
+svmem = namedtuple(
+    'svmem', ['total', 'available', 'percent', 'used', 'free',
+              'active', 'inactive', 'buffers', 'cached'])
+
+pextmem = namedtuple('pextmem', 'rss vms shared text lib data dirty')
+
+pmmap_grouped = namedtuple(
+    'pmmap_grouped', ['path', 'rss', 'size', 'pss', 'shared_clean',
+                      'shared_dirty', 'private_clean', 'private_dirty',
+                      'referenced', 'anonymous', 'swap'])
+
+pmmap_ext = namedtuple(
+    'pmmap_ext', 'addr perms ' + ' '.join(pmmap_grouped._fields))
 
 
 # --- system memory
@@ -131,8 +163,8 @@ def virtual_memory():
     avail = free + buffers + cached
     used = total - free
     percent = usage_percent((total - avail), total, _round=1)
-    return nt_sys_vmem(total, avail, percent, used, free,
-                       active, inactive, buffers, cached)
+    return svmem(total, avail, percent, used, free,
+                 active, inactive, buffers, cached)
 
 
 def swap_memory():
@@ -160,7 +192,7 @@ def swap_memory():
             sin = sout = 0
     finally:
         f.close()
-    return nt_sys_swap(total, used, free, percent, sin, sout)
+    return _common.sswap(total, used, free, percent, sin, sout)
 
 
 @deprecated(replacement='psutil.virtual_memory().cached')
@@ -173,37 +205,7 @@ def phymem_buffers():
     return virtual_memory().buffers
 
 
-# --- CPU
-
-@memoize
-def _get_cputimes_ntuple():
-    """Return a (nt, rindex) tuple depending on the CPU times available
-    on this Linux kernel version which may be:
-    (user, nice, system, idle, iowait, irq, softirq, [steal, [guest,
-     [guest_nice]]])
-    """
-    f = open('/proc/stat', 'r')
-    try:
-        values = f.readline().split()[1:]
-    finally:
-        f.close()
-    fields = ['user', 'nice', 'system', 'idle', 'iowait', 'irq', 'softirq']
-    rindex = 8
-    vlen = len(values)
-    if vlen >= 8:
-        # Linux >= 2.6.11
-        fields.append('steal')
-        rindex += 1
-    if vlen >= 9:
-        # Linux >= 2.6.24
-        fields.append('guest')
-        rindex += 1
-    if vlen >= 10:
-        # Linux >= 3.2.0
-        fields.append('guest_nice')
-        rindex += 1
-    return (namedtuple('cputimes', ' '.join(fields)), rindex)
-
+# --- CPUs
 
 def cpu_times():
     """Return a named tuple representing the following system-wide
@@ -217,17 +219,15 @@ def cpu_times():
         values = f.readline().split()
     finally:
         f.close()
-    nt, rindex = _get_cputimes_ntuple()
-    fields = values[1:rindex]
+    fields = values[1:len(scputimes._fields) + 1]
     fields = [float(x) / CLOCK_TICKS for x in fields]
-    return nt(*fields)
+    return scputimes(*fields)
 
 
 def per_cpu_times():
     """Return a list of namedtuple representing the CPU times
     for every CPU available on the system.
     """
-    nt, rindex = _get_cputimes_ntuple()
     cpus = []
     f = open('/proc/stat', 'r')
     try:
@@ -235,9 +235,10 @@ def per_cpu_times():
         f.readline()
         for line in f:
             if line.startswith('cpu'):
-                fields = line.split()[1:rindex]
+                values = line.split()
+                fields = values[1:len(scputimes._fields) + 1]
                 fields = [float(x) / CLOCK_TICKS for x in fields]
-                entry = nt(*fields)
+                entry = scputimes(*fields)
                 cpus.append(entry)
         return cpus
     finally:
@@ -313,7 +314,7 @@ def users():
             continue
         if hostname == ':0.0':
             hostname = 'localhost'
-        nt = nt_sys_user(user, tty or None, hostname, tstamp)
+        nt = _common.suser(user, tty or None, hostname, tstamp)
         retlist.append(nt)
     return retlist
 
@@ -450,7 +451,7 @@ def disk_partitions(all=False):
         if not all:
             if device == '' or fstype not in phydevs:
                 continue
-        ntuple = nt_sys_diskpart(device, mountpoint, fstype, opts)
+        ntuple = _common.sdiskpart(device, mountpoint, fstype, opts)
         retlist.append(ntuple)
     return retlist
 
@@ -474,9 +475,9 @@ def wrap_exceptions(fun):
             # process is gone in meantime.
             err = sys.exc_info()[1]
             if err.errno in (errno.ENOENT, errno.ESRCH):
-                raise NoSuchProcess(self.pid, self._process_name)
+                raise NoSuchProcess(self.pid, self._name)
             if err.errno in (errno.EPERM, errno.EACCES):
-                raise AccessDenied(self.pid, self._process_name)
+                raise AccessDenied(self.pid, self._name)
             raise
     return wrapper
 
@@ -484,11 +485,11 @@ def wrap_exceptions(fun):
 class Process(object):
     """Linux process implementation."""
 
-    __slots__ = ["pid", "_process_name"]
+    __slots__ = ["pid", "_name"]
 
     def __init__(self, pid):
         self.pid = pid
-        self._process_name = None
+        self._name = None
 
     @wrap_exceptions
     def name(self):
@@ -513,9 +514,9 @@ class Process(object):
                     return ""
                 else:
                     # ok, it is a process which has gone away
-                    raise NoSuchProcess(self.pid, self._process_name)
+                    raise NoSuchProcess(self.pid, self._name)
             if err.errno in (errno.EPERM, errno.EACCES):
-                raise AccessDenied(self.pid, self._process_name)
+                raise AccessDenied(self.pid, self._name)
             raise
 
         # readlink() might return paths containing null bytes causing
@@ -572,7 +573,7 @@ class Process(object):
                     if x is None:
                         raise NotImplementedError(
                             "couldn't read all necessary info from %r" % fname)
-                return nt_proc_io(rcount, wcount, rbytes, wbytes)
+                return _common.pio(rcount, wcount, rbytes, wbytes)
             finally:
                 f.close()
     else:
@@ -592,14 +593,14 @@ class Process(object):
         values = st.split(' ')
         utime = float(values[11]) / CLOCK_TICKS
         stime = float(values[12]) / CLOCK_TICKS
-        return nt_proc_cpu(utime, stime)
+        return _common.pcputimes(utime, stime)
 
     @wrap_exceptions
     def wait(self, timeout=None):
         try:
             return _psposix.wait_pid(self.pid, timeout)
         except TimeoutExpired:
-            raise TimeoutExpired(timeout, self.pid, self._process_name)
+            raise TimeoutExpired(timeout, self.pid, self._name)
 
     @wrap_exceptions
     def create_time(self):
@@ -624,8 +625,8 @@ class Process(object):
         f = open("/proc/%s/statm" % self.pid)
         try:
             vms, rss = f.readline().split()[:2]
-            return nt_proc_mem(int(rss) * PAGESIZE,
-                               int(vms) * PAGESIZE)
+            return _common.pmem(int(rss) * PAGESIZE,
+                                int(vms) * PAGESIZE)
         finally:
             f.close()
 
@@ -648,14 +649,7 @@ class Process(object):
                 [int(x) * PAGESIZE for x in f.readline().split()[:7]]
         finally:
             f.close()
-        return nt_proc_extmem(rss, vms, shared, text, lib, data, dirty)
-
-    _mmap_base_fields = ['path', 'rss', 'size', 'pss', 'shared_clean',
-                         'shared_dirty', 'private_clean', 'private_dirty',
-                         'referenced', 'anonymous', 'swap', ]
-    nt_mmap_grouped = namedtuple('mmap', ' '.join(_mmap_base_fields))
-    nt_mmap_ext = namedtuple('mmap', 'addr perms ' +
-                             ' '.join(_mmap_base_fields))
+        return pextmem(rss, vms, shared, text, lib, data, dirty)
 
     if os.path.exists('/proc/%s/smaps' % os.getpid()):
         def memory_maps(self):
@@ -721,9 +715,9 @@ class Process(object):
                     f.close()
                 err = sys.exc_info()[1]
                 if err.errno in (errno.ENOENT, errno.ESRCH):
-                    raise NoSuchProcess(self.pid, self._process_name)
+                    raise NoSuchProcess(self.pid, self._name)
                 if err.errno in (errno.EPERM, errno.EACCES):
-                    raise AccessDenied(self.pid, self._process_name)
+                    raise AccessDenied(self.pid, self._name)
                 raise
             except:
                 if f is not None:
@@ -757,7 +751,7 @@ class Process(object):
                 elif line.startswith("nonvoluntary_ctxt_switches"):
                     unvol = int(line.split()[1])
                 if vol is not None and unvol is not None:
-                    return nt_proc_ctxsw(vol, unvol)
+                    return _common.pctxsw(vol, unvol)
             raise NotImplementedError(
                 "'voluntary_ctxt_switches' and 'nonvoluntary_ctxt_switches'"
                 "fields were not found in /proc/%s/status; the kernel is "
@@ -802,7 +796,7 @@ class Process(object):
             values = st.split(' ')
             utime = float(values[11]) / CLOCK_TICKS
             stime = float(values[12]) / CLOCK_TICKS
-            ntuple = nt_proc_thread(int(thread_id), utime, stime)
+            ntuple = _common.pthread(int(thread_id), utime, stime)
             retlist.append(ntuple)
         if hit_enoent:
             # raise NSP if the process disappeared on us
@@ -851,7 +845,7 @@ class Process(object):
         @wrap_exceptions
         def ionice_get(self):
             ioclass, value = cext.proc_ioprio_get(self.pid)
-            return nt_proc_ionice(ioclass, value)
+            return _common.pionice(ioclass, value)
 
         @wrap_exceptions
         def ionice_set(self, ioclass, value):
@@ -878,7 +872,7 @@ class Process(object):
 
     if HAS_PRLIMIT:
         @wrap_exceptions
-        def prlimit(self, resource, limits=None):
+        def rlimit(self, resource, limits=None):
             # if pid is 0 prlimit() applies to the calling process and
             # we don't want that
             if self.pid == 0:
@@ -930,7 +924,7 @@ class Process(object):
                     # so we skip it. A regular file is always supposed
                     # to be absolutized though.
                     if file.startswith('/') and isfile_strict(file):
-                        ntuple = nt_proc_file(file, int(fd))
+                        ntuple = _common.popenfile(file, int(fd))
                         retlist.append(ntuple)
         if hit_enoent:
             # raise NSP if the process disappeared on us
@@ -1002,8 +996,8 @@ class Process(object):
                             else:
                                 status = _common.CONN_NONE
                             fd = int(inodes[inode])
-                            conn = nt_proc_conn(fd, family, type_, laddr,
-                                                raddr, status)
+                            conn = _common.pconn(fd, family, type_, laddr,
+                                                 raddr, status)
                             retlist.append(conn)
                     elif family == socket.AF_UNIX:
                         tokens = line.split()
@@ -1016,8 +1010,8 @@ class Process(object):
                                 path = ""
                             fd = int(inodes[inode])
                             type_ = int(type_)
-                            conn = nt_proc_conn(fd, family, type_, path,
-                                                None, _common.CONN_NONE)
+                            conn = _common.pconn(fd, family, type_, path,
+                                                 None, _common.CONN_NONE)
                             retlist.append(conn)
                     else:
                         raise ValueError(family)
@@ -1077,7 +1071,7 @@ class Process(object):
             for line in f:
                 if line.startswith('Uid:'):
                     _, real, effective, saved, fs = line.split()
-                    return nt_proc_uids(int(real), int(effective), int(saved))
+                    return _common.puids(int(real), int(effective), int(saved))
             raise NotImplementedError("line not found")
         finally:
             f.close()
@@ -1089,7 +1083,7 @@ class Process(object):
             for line in f:
                 if line.startswith('Gid:'):
                     _, real, effective, saved, fs = line.split()
-                    return nt_proc_gids(int(real), int(effective), int(saved))
+                    return _common.pgids(int(real), int(effective), int(saved))
             raise NotImplementedError("line not found")
         finally:
             f.close()

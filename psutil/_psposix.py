@@ -12,14 +12,20 @@ import os
 import sys
 import time
 
-from psutil._common import nt_sys_diskusage, usage_percent, memoize
+from psutil._common import sdiskusage, usage_percent, memoize
 from psutil._compat import PY3, unicode
 from psutil._error import TimeoutExpired
 
 
 def pid_exists(pid):
     """Check whether pid exists in the current process table."""
-    assert not pid <= 0, pid
+    if pid == 0:
+        # According to "man 2 kill" PID 0 has a special meaning:
+        # it refers to <<every process in the process group of the
+        # calling process>> so we don't want to go any further.
+        # If we get here it means this UNIX platform *does* have
+        # a process with id 0.
+        return True
     try:
         os.kill(pid, 0)
     except OSError:
@@ -130,7 +136,7 @@ def disk_usage(path):
     # NB: the percentage is -5% than what shown by df due to
     # reserved blocks that we are currently not considering:
     # http://goo.gl/sWGbH
-    return nt_sys_diskusage(total, used, free, percent)
+    return sdiskusage(total, used, free, percent)
 
 
 @memoize

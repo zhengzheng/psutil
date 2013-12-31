@@ -19,6 +19,8 @@ import atexit
 import datetime
 import errno
 import os
+import pickle
+import re
 import select
 import shutil
 import signal
@@ -38,6 +40,10 @@ try:
     import ast  # python >= 2.6
 except ImportError:
     ast = None
+try:
+    import json  # python >= 2.6
+except ImportError:
+    pass
 
 if sys.version_info < (2, 7):
     import unittest2 as unittest  # https://pypi.python.org/pypi/unittest2
@@ -76,8 +82,10 @@ EXAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                '..', 'examples'))
 
 POSIX = os.name == 'posix'
+WINDOWS = os.name == 'nt'
+if WINDOWS:
+    WIN_VISTA = (6, 0, 0)
 LINUX = sys.platform.startswith("linux")
-WINDOWS = sys.platform.startswith("win32")
 OSX = sys.platform.startswith("darwin")
 BSD = sys.platform.startswith("freebsd")
 SUNOS = sys.platform.startswith("sunos")
@@ -436,6 +444,17 @@ def supports_ipv6():
             sock.close()
 
 
+if WINDOWS:
+    def get_winver():
+        wv = sys.getwindowsversion()
+        if hasattr(wv, 'service_pack_major'):  # python >= 2.7
+            sp = wv.service_pack_major or 0
+        else:
+            r = re.search("\s\d$", wv.service_pack)
+            sp = int(r.group(0)) if r else 0
+        return (wv.major, wv.minor, sp)
+
+
 class ThreadTask(threading.Thread):
     """A thread object used for running process thread tests."""
 
@@ -593,8 +612,41 @@ class TestSystemAPIs(unittest.TestCase):
                 self.assertRaises(DeprecationWarning, psutil.cached_phymem)
 
             # Process class
-            self.assertRaises(DeprecationWarning, p.getcwd)
+            names = dir(psutil.Process)
+            self.assertRaises(DeprecationWarning, p.get_children)
             self.assertRaises(DeprecationWarning, p.get_connections)
+            if 'cpu_affinity' in names:
+                self.assertRaises(DeprecationWarning, p.get_cpu_affinity)
+            self.assertRaises(DeprecationWarning, p.get_cpu_percent)
+            self.assertRaises(DeprecationWarning, p.get_cpu_times)
+            self.assertRaises(DeprecationWarning, p.getcwd)
+            self.assertRaises(DeprecationWarning, p.get_ext_memory_info)
+            if 'io_counters' in names:
+                self.assertRaises(DeprecationWarning, p.get_io_counters)
+            if 'ionice' in names:
+                self.assertRaises(DeprecationWarning, p.get_ionice)
+            self.assertRaises(DeprecationWarning, p.get_memory_info)
+            self.assertRaises(DeprecationWarning, p.get_memory_maps)
+            self.assertRaises(DeprecationWarning, p.get_memory_percent)
+            self.assertRaises(DeprecationWarning, p.get_nice)
+            self.assertRaises(DeprecationWarning, p.get_num_ctx_switches)
+            if 'num_fds' in names:
+                self.assertRaises(DeprecationWarning, p.get_num_fds)
+            if 'num_handles' in names:
+                self.assertRaises(DeprecationWarning, p.get_num_handles)
+            self.assertRaises(DeprecationWarning, p.get_num_threads)
+            self.assertRaises(DeprecationWarning, p.get_open_files)
+            if 'rlimit' in names:
+                self.assertRaises(DeprecationWarning, p.get_rlimit)
+            self.assertRaises(DeprecationWarning, p.get_threads)
+            # ...just to be extra sure:
+            for name in names:
+                if name.startswith('get'):
+                    meth = getattr(p, name)
+                    try:
+                        self.assertRaises(DeprecationWarning, meth)
+                    except AssertionError:
+                        self.fail("%s did not raise DeprecationWarning" % name)
 
             # named tuples
             ret = call_until(p.connections, "len(ret) != 0")
@@ -1007,19 +1059,17 @@ class TestProcess(unittest.TestCase):
         sproc = get_test_subprocess(wait=True)
         test_pid = sproc.pid
         p = psutil.Process(test_pid)
-        name = p.name
         p.kill()
         p.wait()
-        self.assertFalse(psutil.pid_exists(test_pid) and name == PYTHON)
+        self.assertFalse(psutil.pid_exists(test_pid))
 
     def test_terminate(self):
         sproc = get_test_subprocess(wait=True)
         test_pid = sproc.pid
         p = psutil.Process(test_pid)
-        name = p.name
         p.terminate()
         p.wait()
-        self.assertFalse(psutil.pid_exists(test_pid) and name == PYTHON)
+        self.assertFalse(psutil.pid_exists(test_pid))
 
     def test_send_signal(self):
         if POSIX:
@@ -1029,10 +1079,9 @@ class TestProcess(unittest.TestCase):
         sproc = get_test_subprocess()
         test_pid = sproc.pid
         p = psutil.Process(test_pid)
-        name = p.name
         p.send_signal(sig)
         p.wait()
-        self.assertFalse(psutil.pid_exists(test_pid) and name == PYTHON)
+        self.assertFalse(psutil.pid_exists(test_pid))
 
     def test_wait(self):
         # check exit code signal
@@ -1040,7 +1089,7 @@ class TestProcess(unittest.TestCase):
         p = psutil.Process(sproc.pid)
         p.kill()
         code = p.wait()
-        if os.name == 'posix':
+        if POSIX:
             self.assertEqual(code, signal.SIGKILL)
         else:
             self.assertEqual(code, 0)
@@ -1050,7 +1099,7 @@ class TestProcess(unittest.TestCase):
         p = psutil.Process(sproc.pid)
         p.terminate()
         code = p.wait()
-        if os.name == 'posix':
+        if POSIX:
             self.assertEqual(code, signal.SIGTERM)
         else:
             self.assertEqual(code, 0)
@@ -1081,7 +1130,8 @@ class TestProcess(unittest.TestCase):
         # timeout < 0 not allowed
         self.assertRaises(ValueError, p.wait, -1)
 
-    @unittest.skipUnless(POSIX, '')  # XXX why is this skipped on Windows?
+    # XXX why is this skipped on Windows?
+    @unittest.skipUnless(POSIX, 'skipped on Windows')
     def test_wait_non_children(self):
         # test wait() against processes which are not our children
         code = "import sys;"
@@ -1117,7 +1167,7 @@ class TestProcess(unittest.TestCase):
                     raise
             else:
                 break
-        if os.name == 'posix':
+        if POSIX:
             self.assertEqual(code, signal.SIGKILL)
         else:
             self.assertEqual(code, 0)
@@ -1131,7 +1181,7 @@ class TestProcess(unittest.TestCase):
             percent = p.cpu_percent(interval=None)
             self.assertIsInstance(percent, float)
             self.assertGreaterEqual(percent, 0.0)
-            if os.name != 'posix':
+            if not POSIX:
                 self.assertLessEqual(percent, 100.0)
             else:
                 self.assertGreaterEqual(percent, 0.0)
@@ -1181,7 +1231,7 @@ class TestProcess(unittest.TestCase):
         # make sure returned value can be pretty printed with strftime
         time.strftime("%Y %m %d %H:%M:%S", time.localtime(p.create_time))
 
-    @unittest.skipIf(WINDOWS, 'windows only')
+    @unittest.skipIf(WINDOWS, 'Windows only')
     def test_terminal(self):
         terminal = psutil.Process().terminal
         if sys.stdin.isatty():
@@ -1189,10 +1239,10 @@ class TestProcess(unittest.TestCase):
         else:
             assert terminal, repr(terminal)
 
-    @unittest.skipIf(not hasattr(psutil.Process, 'get_io_counters'),
-                     'not available on this platform')
+    @unittest.skipUnless(LINUX or BSD or WINDOWS,
+                         'not available on this platform')
     @skip_on_not_implemented(only_if=LINUX)
-    def test_get_io_counters(self):
+    def test_io_counters(self):
         p = psutil.Process()
         # test reads
         io1 = p.io_counters()
@@ -1219,10 +1269,9 @@ class TestProcess(unittest.TestCase):
         assert io2.read_count >= io1.read_count, (io1, io2)
         assert io2.read_bytes >= io1.read_bytes, (io1, io2)
 
-    # Linux and Windows Vista+
-    @unittest.skipUnless(hasattr(psutil.Process, 'get_ionice'),
+    @unittest.skipUnless(LINUX or (WINDOWS and get_winver() >= WIN_VISTA),
                          'Linux and Windows Vista only')
-    def test_get_set_ionice(self):
+    def test_ionice(self):
         if LINUX:
             from psutil import (IOPRIO_CLASS_NONE, IOPRIO_CLASS_RT,
                                 IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE)
@@ -1268,9 +1317,9 @@ class TestProcess(unittest.TestCase):
             self.assertRaises(ValueError, p.set_ionice, 3)
             self.assertRaises(TypeError, p.set_ionice, 2, 1)
 
-    @unittest.skipUnless(hasattr(psutil.Process, 'get_rlimit'),
+    @unittest.skipUnless(LINUX and get_kernel_version() >= (2, 6, 36),
                          "only available on Linux >= 2.6.36")
-    def test_get_rlimit(self):
+    def test_rlimit_get(self):
         import resource
         p = psutil.Process(os.getpid())
         names = [x for x in dir(psutil) if x.startswith('RLIMIT')]
@@ -1288,15 +1337,15 @@ class TestProcess(unittest.TestCase):
                 self.assertGreaterEqual(ret[0], -1)
                 self.assertGreaterEqual(ret[1], -1)
 
-    @unittest.skipUnless(hasattr(psutil.Process, 'set_rlimit'),
+    @unittest.skipUnless(LINUX and get_kernel_version() >= (2, 6, 36),
                          "only available on Linux >= 2.6.36")
-    def test_set_rlimit(self):
+    def test_rlimit_set(self):
         sproc = get_test_subprocess()
         p = psutil.Process(sproc.pid)
         p.set_rlimit(psutil.RLIMIT_NOFILE, (5, 5))
         self.assertEqual(p.rlimit(psutil.RLIMIT_NOFILE), (5, 5))
 
-    def test_get_num_threads(self):
+    def test_num_threads(self):
         # on certain platforms such as Linux we might test for exact
         # thread number, since we always have with 1 thread per process,
         # but this does not apply across all platforms (OSX, Windows)
@@ -1314,12 +1363,12 @@ class TestProcess(unittest.TestCase):
                 thread.stop()
 
     @unittest.skipUnless(WINDOWS, 'Windows only')
-    def test_get_num_handles(self):
+    def test_num_handles(self):
         # a better test is done later into test/_windows.py
         p = psutil.Process()
         self.assertGreater(p.num_handles(), 0)
 
-    def test_get_threads(self):
+    def test_threads(self):
         p = psutil.Process()
         step1 = p.threads()
 
@@ -1343,7 +1392,7 @@ class TestProcess(unittest.TestCase):
             if thread._running:
                 thread.stop()
 
-    def test_get_memory_info(self):
+    def test_memory_info(self):
         p = psutil.Process()
 
         # step 1 - get a base value to compare our results
@@ -1363,10 +1412,10 @@ class TestProcess(unittest.TestCase):
         self.assertGreater(percent2, percent1)
         del memarr
 
-    # def test_get_ext_memory_info(self):
+    # def test_ext_memory_info(self):
     # # tested later in fetch all test suite
 
-    def test_get_memory_maps(self):
+    def test_memory_maps(self):
         p = psutil.Process()
         maps = p.memory_maps()
         paths = [x for x in maps]
@@ -1395,7 +1444,7 @@ class TestProcess(unittest.TestCase):
                     self.assertIsInstance(value, (int, long))
                     assert value >= 0, value
 
-    def test_get_memory_percent(self):
+    def test_memory_percent(self):
         p = psutil.Process()
         self.assertGreater(p.memory_percent(), 0.0)
 
@@ -1469,7 +1518,7 @@ class TestProcess(unittest.TestCase):
     def test_nice(self):
         p = psutil.Process()
         self.assertRaises(TypeError, p.set_nice, "str")
-        if os.name == 'nt':
+        if WINDOWS:
             try:
                 self.assertEqual(p.nice(), psutil.NORMAL_PRIORITY_CLASS)
                 p.set_nice(psutil.HIGH_PRIORITY_CLASS)
@@ -1516,23 +1565,18 @@ class TestProcess(unittest.TestCase):
         else:
             p.username
 
-    @unittest.skipUnless(hasattr(psutil.Process, "get_cwd"),
-                         'not available on this platform')
-    def test_get_cwd(self):
+    def test_cwd(self):
         sproc = get_test_subprocess(wait=True)
         p = psutil.Process(sproc.pid)
         self.assertEqual(p.cwd(), os.getcwd())
 
-    @unittest.skipIf(not hasattr(psutil.Process, "get_cwd"),
-                     'not available on this platform')
-    def test_get_cwd_2(self):
+    def test_cwd_2(self):
         cmd = [PYTHON, "-c", "import os, time; os.chdir('..'); time.sleep(2)"]
         sproc = get_test_subprocess(cmd, wait=True)
         p = psutil.Process(sproc.pid)
         call_until(p.cwd, "ret == os.path.dirname(os.getcwd())")
 
-    @unittest.skipIf(not hasattr(psutil.Process, "get_cpu_affinity"),
-                     'not available on this platform')
+    @unittest.skipUnless(WINDOWS or LINUX, 'not available on this platform')
     def test_cpu_affinity(self):
         p = psutil.Process()
         initial = p.cpu_affinity()
@@ -1551,7 +1595,7 @@ class TestProcess(unittest.TestCase):
         self.assertRaises(ValueError, p.set_cpu_affinity, invalid_cpu)
         self.assertRaises(ValueError, p.set_cpu_affinity, range(10000, 11000))
 
-    def test_get_open_files(self):
+    def test_open_files(self):
         # current process
         p = psutil.Process()
         files = p.open_files()
@@ -1579,7 +1623,7 @@ class TestProcess(unittest.TestCase):
         for file in filenames:
             assert os.path.isfile(file), file
 
-    def test_get_open_files2(self):
+    def test_open_files2(self):
         # test fd and path fields
         fileobj = open(TESTFN, 'w')
         p = psutil.Process()
@@ -1619,7 +1663,7 @@ class TestProcess(unittest.TestCase):
         if WINDOWS:
             psutil.CONN_DELETE_TCB
 
-    def test_get_connections(self):
+    def test_connections(self):
         arg = "import socket, time;" \
               "s = socket.socket();" \
               "s.bind(('127.0.0.1', 0));" \
@@ -1648,7 +1692,7 @@ class TestProcess(unittest.TestCase):
         self.assertRaises(ValueError, p.connections, 'foo')
 
     @unittest.skipUnless(supports_ipv6(), 'IPv6 is not supported')
-    def test_get_connections_ipv6(self):
+    def test_connections_ipv6(self):
         s = socket.socket(AF_INET6, SOCK_STREAM)
         s.bind(('::1', 0))
         s.listen(1)
@@ -1659,7 +1703,7 @@ class TestProcess(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(socket, 'AF_UNIX'),
                          'AF_UNIX is not supported')
-    def test_get_connections_unix(self):
+    def test_connections_unix(self):
         def check(type):
             safe_remove(TESTFN)
             sock = socket.socket(AF_UNIX, type)
@@ -1681,7 +1725,7 @@ class TestProcess(unittest.TestCase):
     @unittest.skipUnless(hasattr(socket, "fromfd"),
                          'socket.fromfd() is not availble')
     @unittest.skipIf(WINDOWS or SUNOS,
-                     'connection fd available on this platform')
+                     'connection fd not available on this platform')
     def test_connection_fromfd(self):
         sock = socket.socket()
         sock.bind(('localhost', 0))
@@ -1701,7 +1745,7 @@ class TestProcess(unittest.TestCase):
             sock.close()
             dupsock.close()
 
-    def test_get_connections_all(self):
+    def test_connections_all(self):
         tcp_template = textwrap.dedent("""
             import socket
             s = socket.socket($family, socket.SOCK_STREAM)
@@ -1779,7 +1823,7 @@ class TestProcess(unittest.TestCase):
                                ("all", "inet", "inet6", "udp", "udp6"))
 
     @unittest.skipUnless(POSIX, 'posix only')
-    def test_get_num_fds(self):
+    def test_num_fds(self):
         p = psutil.Process()
         start = p.num_fds()
         file = open(TESTFN, 'w')
@@ -1791,7 +1835,7 @@ class TestProcess(unittest.TestCase):
         self.assertEqual(p.num_fds(), start)
 
     @skip_on_not_implemented(only_if=LINUX)
-    def test_get_num_ctx_switches(self):
+    def test_num_ctx_switches(self):
         p = psutil.Process()
         before = sum(p.num_ctx_switches())
         for x in range(500000):
@@ -1881,17 +1925,9 @@ class TestProcess(unittest.TestCase):
 
     def test_as_dict(self):
         p = psutil.Process()
-        d = p.as_dict()
-        try:
-            import json
-        except ImportError:
-            pass
-        else:
-            json.loads(json.dumps(d))
-        #
         d = p.as_dict(attrs=['exe', 'name'])
         self.assertEqual(sorted(d.keys()), ['exe', 'name'])
-        #
+
         p = psutil.Process(min(psutil.pids()))
         d = p.as_dict(attrs=['connections'], ad_value='foo')
         if not isinstance(d['connections'], list):
@@ -1919,7 +1955,7 @@ class TestProcess(unittest.TestCase):
                     or name in excluded_names):
                 continue
             try:
-                # if name == 'get_rlimit'
+                # if name == 'rlimit'
                 args = ()
                 meth = getattr(p, name)
                 if callable(meth):
@@ -1937,7 +1973,7 @@ class TestProcess(unittest.TestCase):
 
         # other methods
         try:
-            if os.name == 'posix':
+            if POSIX:
                 p.set_nice(1)
             else:
                 p.set_nice(psutil.NORMAL_PRIORITY_CLASS)
@@ -2001,13 +2037,16 @@ class TestProcess(unittest.TestCase):
                 sock.close()
             reap_children(search_all=True)
 
-    @unittest.skipIf(LINUX, 'PID 0 not available on Linux')
     def test_pid_0(self):
         # Process(0) is supposed to work on all platforms except Linux
+        if 0 not in psutil.pids():
+            self.assertRaises(psutil.NoSuchProcess, psutil.Process, 0)
+            return
+
         p = psutil.Process(0)
         self.assertTrue(p.name)
 
-        if os.name == 'posix':
+        if POSIX:
             try:
                 self.assertEqual(p.uids.real, 0)
                 self.assertEqual(p.gids.real, 0)
@@ -2113,7 +2152,7 @@ class TestFetchAllProcesses(unittest.TestCase):
                     except NotImplementedError:
                         msg = "%r was skipped because not implemented" % (
                             self.__class__.__name__ + '.test_' + name)
-                        self.addSkip(msg)
+                        warn(msg)
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         err = sys.exc_info()[1]
                         self.assertEqual(err.pid, p.pid)
@@ -2194,7 +2233,7 @@ class TestFetchAllProcesses(unittest.TestCase):
 
     def username(self, ret):
         self.assertTrue(ret)
-        if os.name == 'posix':
+        if POSIX:
             self.assertIn(ret, self._usernames)
 
     def status(self, ret):
@@ -2493,6 +2532,25 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         # docstring
         self.assertEqual(foo.__doc__, "foo docstring")
+
+    def test_serialization(self):
+        def check(ret):
+            if json is not None:
+                json.loads(json.dumps(ret))
+            a = pickle.dumps(ret)
+            b = pickle.loads(a)
+            self.assertEqual(ret, b)
+
+        check(psutil.Process().as_dict())
+        check(psutil.virtual_memory())
+        check(psutil.swap_memory())
+        check(psutil.cpu_times())
+        check(psutil.cpu_times_percent(interval=0))
+        check(psutil.net_io_counters())
+        check(psutil.disk_io_counters())
+        check(psutil.disk_partitions())
+        check(psutil.disk_usage(os.getcwd()))
+        check(psutil.users())
 
 
 # ===================================================================

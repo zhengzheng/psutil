@@ -22,7 +22,7 @@ __all__ = [
     "version_info", "__version__",
     "STATUS_RUNNING", "STATUS_IDLE", "STATUS_SLEEPING", "STATUS_DISK_SLEEP",
     "STATUS_STOPPED", "STATUS_TRACING_STOP", "STATUS_ZOMBIE", "STATUS_DEAD",
-    "STATUS_WAKING", "STATUS_LOCKED",
+    "STATUS_WAKING", "STATUS_LOCKED", "STATUS_WAITING", "STATUS_LOCKED",
     "CONN_ESTABLISHED", "CONN_SYN_SENT", "CONN_SYN_RECV", "CONN_FIN_WAIT1",
     "CONN_FIN_WAIT2", "CONN_TIME_WAIT", "CONN_CLOSE", "CONN_CLOSE_WAIT",
     "CONN_LAST_ACK", "CONN_LISTEN", "CONN_CLOSING", "CONN_NONE",
@@ -51,17 +51,15 @@ except ImportError:
 
 from psutil._error import Error, NoSuchProcess, AccessDenied, TimeoutExpired
 from psutil._common import cached_property, memoize
-from psutil._compat import property, callable, defaultdict, namedtuple
+from psutil._compat import property, callable, defaultdict
 from psutil._compat import (wraps as _wraps,
                             PY3 as _PY3)
 from psutil._common import (deprecated_method as _deprecated_method,
                             deprecated as _deprecated,
-                            nt_sys_diskio as _nt_sys_diskio,
-                            nt_sys_netio as _nt_sys_netio,
-                            nt_sys_vmem as _nt_sys_vmem)
+                            sdiskio as _nt_sys_diskio,
+                            snetio as _nt_sys_netio)
 
 from psutil._common import (STATUS_RUNNING,
-                            STATUS_IDLE,
                             STATUS_SLEEPING,
                             STATUS_DISK_SLEEP,
                             STATUS_STOPPED,
@@ -69,7 +67,10 @@ from psutil._common import (STATUS_RUNNING,
                             STATUS_ZOMBIE,
                             STATUS_DEAD,
                             STATUS_WAKING,
-                            STATUS_LOCKED)
+                            STATUS_LOCKED,
+                            STATUS_IDLE,  # bsd
+                            STATUS_WAITING,  # bsd
+                            STATUS_LOCKED)  # bsd
 
 from psutil._common import (CONN_ESTABLISHED,
                             CONN_SYN_SENT,
@@ -161,6 +162,8 @@ __all__.extend(_psplatform.__extra__all__)
 
 
 _TOTAL_PHYMEM = None
+_POSIX = os.name == 'posix'
+_WINDOWS = os.name == 'nt'
 
 
 def _assert_pid_not_reused(fun):
@@ -170,7 +173,7 @@ def _assert_pid_not_reused(fun):
     @_wraps(fun)
     def wrapper(self, *args, **kwargs):
         if not self.is_running():
-            raise NoSuchProcess(self.pid, self._proc._process_name)
+            raise NoSuchProcess(self.pid, self._proc._name)
         return fun(self, *args, **kwargs)
     return wrapper
 
@@ -210,9 +213,8 @@ class Process(object):
         if pid is None:
             pid = os.getpid()
         else:
-            if not _PY3:
-                if not isinstance(pid, (int, long)):
-                    raise TypeError('pid must be an integer (got %r)' % pid)
+            if not _PY3 and not isinstance(pid, (int, long)):
+                raise TypeError('pid must be an integer (got %r)' % pid)
             if pid < 0:
                 raise ValueError('pid must be a positive integer (got %s)'
                                  % pid)
@@ -280,7 +282,7 @@ class Process(object):
 
         If 'attrs' is specified it must be a list of strings
         reflecting available Process class' attribute names
-        (e.g. ['get_cpu_times', 'name']) else all public (read
+        (e.g. ['cpu_times', 'name']) else all public (read
         only) attributes are assumed.
 
         'ad_value' is the value which gets assigned in case
@@ -367,7 +369,7 @@ class Process(object):
 
         # XXX should we check creation time here rather than in
         # Process.parent?
-        if os.name == 'posix':
+        if _POSIX:
             return self._proc.ppid()
         else:
             if self._ppid is None:
@@ -378,7 +380,7 @@ class Process(object):
     def name(self):
         """The process name."""
         name = self._proc.name()
-        if os.name == 'posix' and len(name) >= 15:
+        if _POSIX and len(name) >= 15:
             # On UNIX the name gets truncated to the first 15 characters.
             # If it matches the first part of the cmdline we return that
             # one instead because it's usually more explicative.
@@ -392,8 +394,7 @@ class Process(object):
                     extended_name = os.path.basename(cmdline[0])
                     if extended_name.startswith(name):
                         name = extended_name
-        # XXX - perhaps needs refactoring
-        self._proc._process_name = name
+        self._proc._name = name
         return name
 
     @cached_property
@@ -442,7 +443,7 @@ class Process(object):
         """The process current status as a STATUS_* constant."""
         return self._proc.status()
 
-    if os.name == 'posix':
+    if _POSIX:
 
         @property
         def uids(self):
@@ -470,7 +471,7 @@ class Process(object):
         """The name of the user that owns the process.
         On UNIX this is calculated by using *real* process uid.
         """
-        if os.name == 'posix':
+        if _POSIX:
             if pwd is None:
                 # might happen if python was installed from sources
                 raise ImportError(
@@ -513,7 +514,7 @@ class Process(object):
         return self._proc.nice_set(value)
 
     # Linux and Windows >= Vista only
-    if hasattr(_psplatform.Process, "ionice"):
+    if hasattr(_psplatform.Process, "ionice_get"):
 
         def ionice(self):
             """Return process I/O niceness (priority).
@@ -541,7 +542,7 @@ class Process(object):
             return self._proc.ionice_set(ioclass, value)
 
     # Linux only
-    if hasattr(_psplatform.Process, "prlimit"):
+    if hasattr(_psplatform.Process, "rlimit"):
 
         def rlimit(self, resource):
             """Get process resource limits as a (soft, hard)
@@ -551,7 +552,7 @@ class Process(object):
 
             See "man prlimit" for further info.
             """
-            return self._proc.prlimit(resource)
+            return self._proc.rlimit(resource)
 
         @_assert_pid_not_reused
         def set_rlimit(self, resource, limits):
@@ -563,10 +564,10 @@ class Process(object):
 
             See "man prlimit" for further info.
             """
-            self._proc.prlimit(resource, limits)
+            self._proc.rlimit(resource, limits)
 
     # Windows and Linux only
-    if hasattr(_psplatform.Process, "cpu_affinity"):
+    if hasattr(_psplatform.Process, "cpu_affinity_get"):
 
         def cpu_affinity(self):
             """Get process current CPU affinity."""
@@ -579,7 +580,7 @@ class Process(object):
             """
             return self._proc.cpu_affinity_set(cpus)
 
-    if os.name == 'nt':
+    if _WINDOWS:
 
         def num_handles(self):
             """Return the number of handles opened by this process
@@ -587,7 +588,7 @@ class Process(object):
             """
             return self._proc.num_handles()
 
-    if os.name == 'posix':
+    if _POSIX:
 
         def num_fds(self):
             """Return the number of file descriptors opened by this
@@ -630,19 +631,19 @@ class Process(object):
 
         >>> import psutil
         >>> p = psutil.Process()
-        >>> p.get_children()
+        >>> p.children()
         B, C, D
-        >>> p.get_children(recursive=True)
+        >>> p.children(recursive=True)
         B, X, Y, C, D
 
         Note that in the example above if process X disappears
         process Y won't be listed as the reference to process A
         is lost.
         """
-        if hasattr(_psplatform, 'get_ppid_map'):
+        if hasattr(_psplatform, 'ppid_map'):
             # Windows only: obtain a {pid:ppid, ...} dict for all running
             # processes in one shot (faster).
-            ppid_map = _psplatform.get_ppid_map()
+            ppid_map = _psplatform.ppid_map()
         else:
             ppid_map = None
 
@@ -726,10 +727,10 @@ class Process(object):
           >>> import psutil
           >>> p = psutil.Process(os.getpid())
           >>> # blocking
-          >>> p.get_cpu_percent(interval=1)
+          >>> p.cpu_percent(interval=1)
           2.0
           >>> # non-blocking (percentage since last call)
-          >>> p.get_cpu_percent(interval=0)
+          >>> p.cpu_percent(interval=0)
           2.9
           >>>
         """
@@ -769,7 +770,7 @@ class Process(object):
         #   comprehending-top-cpu-usage
         # On windows we use this ugly hack in order to avoid float
         # precision issues.
-        if os.name != 'posix':
+        if not _POSIX:
             if single_cpu_percent > 100.0:
                 return 100.0
         return round(single_cpu_percent, 1)
@@ -832,10 +833,10 @@ class Process(object):
                     d[path] = map(lambda x, y: x + y, d[path], nums)
                 except KeyError:
                     d[path] = nums
-            nt = self._proc.nt_mmap_grouped
+            nt = _psplatform.pmmap_grouped
             return [nt(path, *d[path]) for path in d]
         else:
-            nt = self._proc.nt_mmap_ext
+            nt = _psplatform.pmmap_ext
             return [nt(*x) for x in it]
 
     def open_files(self):
@@ -891,17 +892,16 @@ class Process(object):
         On Windows only SIGTERM is valid and is treated as an alias
         for kill().
         """
-        if os.name == 'posix':
+        if _POSIX:
             try:
                 os.kill(self.pid, sig)
             except OSError:
                 err = sys.exc_info()[1]
-                name = self._proc._process_name
                 if err.errno == errno.ESRCH:
                     self._gone = True
-                    raise NoSuchProcess(self.pid, name)
+                    raise NoSuchProcess(self.pid, self._proc._name)
                 if err.errno == errno.EPERM:
-                    raise AccessDenied(self.pid, name)
+                    raise AccessDenied(self.pid, self._proc._name)
                 raise
         else:
             if sig == signal.SIGTERM:
@@ -947,7 +947,7 @@ class Process(object):
         """Kill the current process with SIGKILL pre-emptively checking
         whether PID has been reused.
         """
-        if os.name == 'posix':
+        if _POSIX:
             self.send_signal(signal.SIGKILL)
         else:
             self._proc.kill()
@@ -968,6 +968,8 @@ class Process(object):
 
     # --- deprecated APIs
 
+    _locals = set(locals())
+
     @_deprecated_method(replacement='children')
     def get_children(self):
         pass
@@ -976,7 +978,7 @@ class Process(object):
     def get_connections(self):
         pass
 
-    if hasattr(_psplatform.Process, "cpu_affinity"):
+    if "cpu_affinity" in _locals:
         @_deprecated_method(replacement='cpu_affinity')
         def get_cpu_affinity(self):
             pass
@@ -997,12 +999,12 @@ class Process(object):
     def get_ext_memory_info(self):
         pass
 
-    if hasattr(_psplatform.Process, "io_counters"):
+    if "io_counters" in _locals:
         @_deprecated_method(replacement='io_counters')
         def get_io_counters(self):
             pass
 
-    if hasattr(_psplatform.Process, "ionice"):
+    if "ionice" in _locals:
         @_deprecated_method(replacement='ionice')
         def get_ionice(self):
             pass
@@ -1027,12 +1029,12 @@ class Process(object):
     def get_num_ctx_switches(self):
         pass
 
-    if os.name == 'posix':
+    if 'num_fds' in _locals:
         @_deprecated_method(replacement='num_fds')
         def get_num_fds(self):
             pass
 
-    if os.name == 'nt':
+    if 'num_handles' in _locals:
         @_deprecated_method(replacement='num_handles')
         def get_num_handles(self):
             pass
@@ -1045,7 +1047,7 @@ class Process(object):
     def get_open_files(self):
         pass
 
-    if hasattr(_psplatform.Process, "prlimit"):
+    if "rlimit" in _locals:
         @_deprecated_method(replacement='rlimit')
         def get_rlimit(self):
             pass
@@ -1053,6 +1055,8 @@ class Process(object):
     @_deprecated_method(replacement='threads')
     def get_threads(self):
         pass
+
+    del _locals
 
 
 class Popen(Process):
@@ -1135,7 +1139,7 @@ def pid_exists(pid):
     """
     if pid < 0:
         return False
-    elif pid == 0 and os.name == 'posix':
+    elif pid == 0 and _POSIX:
         # On POSIX we use os.kill() to determine PID existence.
         # According to "man 2 kill" PID 0 has a special meaning
         # though: it refers to <<every process in the process
@@ -1424,7 +1428,6 @@ def cpu_percent(interval=0.1, percpu=False):
 # the same program.
 _last_cpu_times_2 = _last_cpu_times
 _last_per_cpu_times_2 = _last_per_cpu_times
-_ptime_cpu_perc_nt = None
 
 def cpu_times_percent(interval=0.1, percpu=False):
     """Same as cpu_percent() but provides utilization percentages
@@ -1442,10 +1445,8 @@ def cpu_times_percent(interval=0.1, percpu=False):
     global _last_cpu_times_2
     global _last_per_cpu_times_2
     blocking = interval is not None and interval > 0.0
-    WINDOWS = os.name == 'nt'
 
     def calculate(t1, t2):
-        global _ptime_cpu_perc_nt
         nums = []
         all_delta = sum(t2) - sum(t1)
         for field in t1._fields:
@@ -1455,7 +1456,7 @@ def cpu_times_percent(interval=0.1, percpu=False):
             except ZeroDivisionError:
                 field_perc = 0.0
             field_perc = round(field_perc, 1)
-            if WINDOWS:
+            if _WINDOWS:
                 # XXX
                 # Work around:
                 # https://code.google.com/p/psutil/issues/detail?id=392
@@ -1473,9 +1474,7 @@ def cpu_times_percent(interval=0.1, percpu=False):
                 elif field_perc < 0.0:
                     field_perc = 0.0
             nums.append(field_perc)
-        if _ptime_cpu_perc_nt is None:
-            _ptime_cpu_perc_nt = namedtuple('cpupercent', ' '.join(t1._fields))
-        return _ptime_cpu_perc_nt(*nums)
+        return _psplatform.scputimes(*nums)
 
     # system-wide usage
     if not percpu:
@@ -1559,7 +1558,7 @@ def virtual_memory():
     """
     global _TOTAL_PHYMEM
     ret = _psplatform.virtual_memory()
-    # cached for later use in Process.get_memory_percent()
+    # cached for later use in Process.memory_percent()
     _TOTAL_PHYMEM = ret.total
     return ret
 
@@ -1719,8 +1718,7 @@ def phymem_usage():
     on the system in bytes plus the percentage usage.
     Deprecated; use psutil.virtual_memory() instead.
     """
-    mem = virtual_memory()
-    return _nt_sys_vmem(mem.total, mem.used, mem.free, mem.percent)
+    return virtual_memory()
 
 
 @_deprecated(replacement="psutil.swap_memory()")
@@ -1769,7 +1767,7 @@ def test():
     templ = "%-10s %5s %4s %4s %7s %7s %-13s %5s %7s  %s"
     attrs = ['pid', 'cpu_percent', 'memory_percent', 'name', 'cpu_times',
              'create_time', 'memory_info']
-    if os.name == 'posix':
+    if _POSIX:
         attrs.append('uids')
         attrs.append('terminal')
     print_(templ % ("USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY",
@@ -1793,7 +1791,7 @@ def test():
             try:
                 user = p.username
             except KeyError:
-                if os.name == 'posix':
+                if _POSIX:
                     if pinfo['uids']:
                         user = str(pinfo['uids'].real)
                     else:
@@ -1802,7 +1800,7 @@ def test():
                     raise
             except Error:
                 user = ''
-            if os.name == 'nt' and '\\' in user:
+            if _WINDOWS and '\\' in user:
                 user = user.split('\\')[1]
             vms = pinfo['memory_info'] and \
                 int(pinfo['memory_info'].vms / 1024) or '?'
