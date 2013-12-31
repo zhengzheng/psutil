@@ -307,7 +307,7 @@ psutil_proc_cpu_times_2(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     user = (double)process->UserTime.HighPart * 429.4967296 + \
@@ -407,7 +407,7 @@ psutil_proc_create_time_2(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     // special case for PIDs 0 and 4, return system boot time
@@ -681,7 +681,7 @@ psutil_proc_memory_info_2(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
 
@@ -1122,7 +1122,7 @@ psutil_proc_num_threads(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     num = (int)process->NumberOfThreads;
@@ -2112,7 +2112,7 @@ psutil_proc_io_counters_2(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     rcount = process->ReadOperationCount.QuadPart;
@@ -2207,7 +2207,7 @@ psutil_proc_is_suspended(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     for (i = 0; i < process->NumberOfThreads; i++) {
@@ -2806,7 +2806,7 @@ psutil_proc_num_handles_2(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     count = process->HandleCount;
@@ -2830,7 +2830,7 @@ psutil_proc_num_ctx_switches(PyObject *self, PyObject *args)
     if (! PyArg_ParseTuple(args, "l", &pid)) {
         return NULL;
     }
-    if (! get_proc_info(pid, &process, &buffer)) {
+    if (! psutil_get_proc_info(pid, &process, &buffer)) {
         return NULL;
     }
     for (i = 0; i < process->NumberOfThreads; i++) {
