@@ -1,5 +1,220 @@
 Bug tracker at http://code.google.com/p/psutil/issues
 
+2.0.0 - XXXX-XX-XX
+------------------
+
+ENHANCEMENTS
+
+ * #424: [Windows] installer for Python 3.X 64 bit.
+ * #427: number of logical and physical CPUs (psutil.cpu_count()).
+ * #447: psutil.wait_procs() timeout parameter is now optional.
+ * #452: make Process instances hashable and usable with set()s.
+ * #453: tests on Python < 2.7 require unittest2 module.
+ * #459: add a make file for running tests and other repetitive tasks (also
+         on Windows).
+ * #463: make timeout parameter of cpu_percent* functions default to 0.0 'cause
+         it's a commond trap to introduce slowdowns.
+ * #468: move documentation to readthedocs.com.
+ * #477: process cpu_percent() is about 30% faster.  (suggested by crusaderky)
+ * #478: [Linux] almost all APIs are about 30% faster on Python 3.X.
+ * #479: long deprecated psutil.error module is gone; exception classes now
+         live in "psutil" namespace only.
+
+BUG FIXES
+
+ * #193: psutil.Popen constructor can throw an exception if the spawned process
+         terminates quickly.
+ * #340: [Windows] process get_open_files() no longer hangs.  (patch by
+         jtang@vahna.net)
+ * #443: [Linux] fix a potential overflow issue for Process.set_cpu_affinity()
+         on systems with more than 64 CPUs.
+ * #448: [Windows] get_children() and ppid() memory leak (patch by Ulrich
+         Klank).
+ * #457: [POSIX] pid_exists() always returns True for PID 0.
+ * #461: namedtuples are not pickle-able.
+ * #466: [Linux] process exe improper null bytes handling.  (patch by
+         Gautam Singh)
+ * #470: wait_procs() might not wait.  (patch by crusaderky)
+ * #471: [Windows] process exe improper unicode handling. (patch by
+         alex@mroja.net)
+ * #473: psutil.Popen.wait() does not set returncode attribute.
+ * #474: [Windows] Process.cpu_percent() is no longer capped at 100%.
+ * #476: [Linux] encoding error for process name and cmdline.
+
+API CHANGES
+
+For the sake of consistency a lot of psutil APIs have been renamed.
+In most cases accessing the old names will work but it will cause a DeprecationWarning.
+
+ * psutil.* module level constants have being replaced by functions:
+
+    ---------------------------------------------------------
+   | Old name                | Replacement                   |
+    ---------------------------------------------------------
+   | - psutil.NUM_CPUS       | psutil.cpu_cpunt()            |
+   | - psutil.BOOT_TIME      | psutil.boot_time()            |
+   | - psutil.TOTAL_PHYMEM   | psutil.virtual_memory().total |
+    ---------------------------------------------------------
+
+ * Renamed psutil.* functions:
+
+    -----------------------------------------------
+   | Old name                 | Replacement        |
+    -----------------------------------------------
+   | - psutil.get_pid_list()  | psutil.pids()      |
+   | - psutil.get_users()     | psutil.users()     |
+   | - psutil.get_boot_time() | psutil.boot_time() |
+    -----------------------------------------------
+
+ * All psutil.Process get_* methods lost the "get_" prefix.
+   get_ext_memory_info() renamed to memory_info_ex().
+   Assuming "p = psutil.Process()":
+
+    -------------------------------------------------
+   | Old name                 | Replacement          |
+    -------------------------------------------------
+   | p.get_children()         | p.children()         |
+   | p.get_connections()      | p.connections()      |
+   | p.get_cpu_affinity()     | p.cpu_affinity()     |
+   | p.get_cpu_percent()      | p.cpu_percent()      |
+   | p.get_cpu_times()        | p.cpu_times()        |
+   | p.get_ext_memory_info()  | p.memory_info_ex()   |
+   | p.get_io_counters()      | p.io_counters()      |
+   | p.get_ionice()           | p.ionice()           |
+   | p.get_memory_info()      | p.memory_info()      |
+   | p.get_memory_maps()      | p.memory_maps()      |
+   | p.get_memory_percent()   | p.memory_percent()   |
+   | p.get_nice()             | p.nice()             |
+   | p.get_num_ctx_switches() | p.num_ctx_switches() |
+   | p.get_num_fds()          | p.num_fds()          |
+   | p.get_num_threads()      | p.num_threads()      |
+   | p.get_open_files()       | p.open_files()       |
+   | p.get_rlimit()           | p.rlimit()           |
+   | p.get_threads()          | p.threads()          |
+   | p.getcwd()               | p.cwd()              |
+    -------------------------------------------------
+
+ * All psutil.Process set_* methods lost the "set_" prefix.
+   Assuming "p = psutil.Process()":
+
+    --------------------------------------------------------
+   | Old name             | Replacement                     |
+    --------------------------------------------------------
+   | p.set_nice()         | p.nice(value)                   |
+   | p.set_ionice()       | p.ionice(ioclass, value=None)   |
+   | p.set_cpu_affinity() | p.cpu_affinity(cpus)            |
+   | p.set_rlimit()       | p.rlimit(resource, limits=None) |
+    --------------------------------------------------------
+
+ * Except for 'pid' all psutil.Process class properties have been turned into
+   methods. This is the only case which there are no aliases.
+   Assuming "p = psutil.Process()":
+
+    ---------------------------------
+   | Old name      | Replacement     |
+    ---------------------------------
+   | p.name        | p.name()        |
+   | p.parent      | p.parent()      |
+   | p.ppid        | p.ppid()        |
+   | p.exe         | p.exe()         |
+   | p.cmdline     | p.cmdline()     |
+   | p.status      | p.status()      |
+   | p.uids        | p.uids()        |
+   | p.gids        | p.gids()        |
+   | p.username    | p.username()    |
+   | p.create_time | p.create_time() |
+    ---------------------------------
+
+ * Others:
+  * timeout parameter of cpu_percent* functions defaults to 0.0 instead of 0.1.
+  * long deprecated psutil.error module is gone; exception classes now live in
+    "psutil" namespace only.
+  * Process instances' "retcode" attribute returned by psutil.wait_procs() has
+    been renamed to "returncode" for consistency with subprocess.Popen.
+
+
+1.2.1 - 2013-11-25
+------------------
+
+BUG FIXES
+
+ * #348: [Windows XP] fixed "ImportError: DLL load failed" occurring on module
+         import.
+ * #425: [Solaris] crash on import due to failure at determining BOOT_TIME.
+ * #443: [Linux] can't set CPU affinity on systems with more than 64 cores.
+
+
+1.2.0 - 2013-11-20
+------------------
+
+ENHANCEMENTS
+
+ * #439: assume os.getpid() if no argument is passed to psutil.Process
+         constructor.
+ * #440: new psutil.wait_procs() utility function which waits for multiple
+         processes to terminate.
+
+BUG FIXES
+
+ * #348: [Windows XP/Vista] fix "ImportError: DLL load failed" occurring on
+         module import.
+
+
+1.1.3 - 2013-11-07
+------------------
+
+BUG FIXES
+
+ * #442: [Linux] psutil won't compile on certain version of Linux because of
+         missing prlimit(2) syscall.
+
+
+1.1.2 - 2013-10-22
+------------------
+
+BUG FIXES
+
+ * #442: [Linux] psutil won't compile on Debian 6.0 because of missing
+         prlimit(2) syscall.
+
+
+1.1.1 - 2013-10-08
+------------------
+
+BUG FIXES
+
+ * #442: [Linux] psutil won't compile on kernels < 2.6.36 due to missing
+         prlimit(2) syscall.
+
+
+1.1.0 - 2013-09-28
+------------------
+
+ENHANCEMENTS
+
+ * #410: host tar.gz and windows binary files are on PYPI.
+ * #412: [Linux] get/set process resource limits.
+ * #415: [Windows] Process.get_children() is an order of magnitude faster.
+ * #426: [Windows] Process.name is an order of magnitude faster.
+ * #431: [UNIX] Process.name is slightly faster because it unnecessarily
+         retrieved also process cmdline.
+
+BUG FIXES
+
+ * #391: [Windows] psutil.cpu_times_percent() returns negative percentages.
+ * #408: STATUS_* and CONN_* constants don't properly serialize on JSON.
+ * #411: [Windows] examples/disk_usage.py may pop-up a GUI error.
+ * #413: [Windows] Process.get_memory_info() leaks memory.
+ * #414: [Windows] Process.exe on Windows XP may raise ERROR_INVALID_PARAMETER.
+ * #416: psutil.disk_usage() doesn't work well with unicode path names.
+ * #430: [Linux] process IO counters report wrong number of r/w syscalls.
+ * #435: [Linux] psutil.net_io_counters() might report erreneous NIC names.
+ * #436: [Linux] psutil.net_io_counters() reports a wrong 'dropin' value.
+
+API CHANGES
+
+ * #408: turn STATUS_* and CONN_* constants into plain Python strings.
+
 
 1.0.1 - 2013-07-12
 ------------------
@@ -17,12 +232,12 @@ NEW FEATURES
  * #18:  Solaris support (yay!)  (thanks Justin Venus)
  * #367: Process.get_connections() 'status' strings are now constants.
  * #380: test suite exits with non-zero on failure.  (patch by floppymaster)
- * #391: extensively use unittest2 module in unit tests and provide
-         workarounds if this is not installed on python < 2.7.
+ * #391: introduce unittest2 facilities and provide workarounds if unittest2
+         is not installed (python < 2.7).
 
 BUG FIXES
 
- * #374: [Windows] negative memory usage reported when processes use a lot of
+ * #374: [Windows] negative memory usage reported if process uses a lot of
          memory.
  * #379: [Linux] Process.get_memory_maps() may raise ValueError.
  * #394: [OSX] Mapped memory regions report incorrect file name.
@@ -30,10 +245,10 @@ BUG FIXES
 
 API CHANGES
 
- * Process.get_connections() 'status' field is no longer a string but a constant
-   object (psutil.CONN_*).
- * Process.get_connections() 'local_address' and 'remote_address' fields renamed
-   to 'laddr' and 'raddr'.
+ * Process.get_connections() 'status' field is no longer a string but a
+   constant object (psutil.CONN_*).
+ * Process.get_connections() 'local_address' and 'remote_address' fields
+   renamed to 'laddr' and 'raddr'.
  * psutil.network_io_counters() renamed to psutil.net_io_counters().
 
 
