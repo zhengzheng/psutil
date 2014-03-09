@@ -7,22 +7,22 @@
 """Linux specific tests.  These are implicitly run by test_psutil.py."""
 
 from __future__ import division
-import unittest
-import subprocess
-import sys
-import time
 import os
 import re
+import sys
+import time
 
-from test_psutil import *
-from psutil._compat import PY3
+from test_psutil import (POSIX, TOLERANCE, skip_on_not_implemented, sh,
+                         get_test_subprocess, retry_before_failing,
+                         get_kernel_version, unittest)
 import psutil
 
 
 class LinuxSpecificTestCase(unittest.TestCase):
 
-    @unittest.skipIf(POSIX and not hasattr(os, 'statvfs'),
-            reason="os.statvfs() function not available on this platform")
+    @unittest.skipIf(
+        POSIX and not hasattr(os, 'statvfs'),
+        reason="os.statvfs() function not available on this platform")
     @skip_on_not_implemented()
     def test_disks(self):
         # test psutil.disk_usage() and psutil.disk_partitions()
@@ -53,9 +53,11 @@ class LinuxSpecificTestCase(unittest.TestCase):
         sproc = get_test_subprocess()
         time.sleep(1)
         p = psutil.Process(sproc.pid)
-        maps = p.get_memory_maps(grouped=False)
+        maps = p.memory_maps(grouped=False)
         pmap = sh('pmap -x %s' % p.pid).split('\n')
-        del pmap[0]; del pmap[0]  # get rid of header
+        # get rid of header
+        del pmap[0]
+        del pmap[0]
         while maps and pmap:
             this = maps.pop(0)
             other = pmap.pop(0)
@@ -120,11 +122,8 @@ class LinuxSpecificTestCase(unittest.TestCase):
 
     def test_cpu_times(self):
         fields = psutil.cpu_times()._fields
-        kernel_ver = re.findall('\d.\d.\d', os.uname()[2])[0]
+        kernel_ver = re.findall('\d+\.\d+\.\d+', os.uname()[2])[0]
         kernel_ver_info = tuple(map(int, kernel_ver.split('.')))
-        # steal >= 2.6.11
-        # guest >= 2.6.24
-        # guest_nice >= 3.2.0
         if kernel_ver_info >= (2, 6, 11):
             self.assertIn('steal', fields)
         else:
@@ -138,50 +137,40 @@ class LinuxSpecificTestCase(unittest.TestCase):
         else:
             self.assertNotIn('guest_nice', fields)
 
-    def test_netstat_inet(self):
-        # Test TCP and UDP connections against 'netstat -antup'.
-        # This tests assume netstat output uses the same order in which
-        # psutil.net_connections() yields connections so it might be
-        # unreliable.
-        # It is also easy to incur into race conditions in case
-        # a connections borns or dies during between 2 calls.
-        def convert_addr(addr):
-            addr = addr.rsplit(':', 1)
-            addr[1] = int(addr[1])
-            return tuple(addr)
+    # --- tests for specific kernel versions
 
-        # retry as long as netstat and psutil return the same number
-        # of connections
-        for x in range(10):
-            cons = psutil.net_connections(kind='inet')
-            out = sh('netstat -antup').strip()
-            lines = out.split('\n')[2:]
-            if len(cons) == len(lines):
-                break
-        else:
-            self.skip("len connections mismatch (psutil=%s, netstat=%s)" \
-                      % (len(cons), len(lines)))
+    @unittest.skipUnless(
+        get_kernel_version() >= (2, 6, 36),
+        "prlimit() not available on this Linux kernel version")
+    def test_prlimit_availability(self):
+        # prlimit() should be available starting from kernel 2.6.36
+        p = psutil.Process(os.getpid())
+        p.rlimit(psutil.RLIMIT_NOFILE)
+        # if prlimit() is supported *at least* these constants should
+        # be available
+        self.assertTrue(hasattr(psutil, "RLIM_INFINITY"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_AS"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_CORE"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_CPU"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_DATA"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_FSIZE"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_LOCKS"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_MEMLOCK"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_NOFILE"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_NPROC"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_RSS"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_STACK"))
 
-        for line in lines:
-            status = None
-            conn = cons.pop(0)
-            if line.startswith('tcp'):
-                proto, _, _, laddr, raddr, status = line.split()[:6]
-            else:
-                proto, _, _, laddr, raddr = line.split()[:5]
-
-            self.assertEqual(convert_addr(laddr), conn.laddr)
-            if '*' not in raddr:
-                self.assertEqual(convert_addr(raddr), conn.raddr)
-            if status is not None:
-                self.assertEqual(status, str(conn.status))
-
-            pid = re.search(r'\s\d+/', line)
-            if pid is not None:
-                pid = pid.group(0).strip().replace('/', '')
-                self.assertEqual(int(pid), conn.pid)
-            else:
-                self.assertEqual(conn.pid, None)
+    @unittest.skipUnless(
+        get_kernel_version() >= (3, 0),
+        "prlimit constants not available on this Linux kernel version")
+    def test_resource_consts_kernel_v(self):
+        # more recent constants
+        self.assertTrue(hasattr(psutil, "RLIMIT_MSGQUEUE"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_NICE"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_RTPRIO"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_RTTIME"))
+        self.assertTrue(hasattr(psutil, "RLIMIT_SIGPENDING"))
 
 
 def test_main():
