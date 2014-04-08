@@ -396,11 +396,9 @@ Network
      pconn(fd=-1, family=2, type=1, laddr=('10.0.0.1', 51314), raddr=('72.14.234.83', 443), status='SYN_SENT', pid=None)
      ...]
 
-  .. note:: (OSX) :class:`psutil.AccessDenied` is always raised unless running 
+  .. note:: (OSX) :class:`psutil.AccessDenied` is always raised unless running
      as root (lsof does the same).
   .. note:: (Solaris) UNIX sockets are not supported.
-
-  *Availability: all platforms except OSX*
 
   *New in 2.1.0*
 
@@ -448,7 +446,7 @@ Functions
 
 .. function:: pids()
 
-  Return a list of current running PIDs. To iterate over all process
+  Return a list of current running PIDs. To iterate over all processes
   :func:`process_iter()` should be preferred.
 
 .. function:: pid_exists(pid)
@@ -512,16 +510,21 @@ Functions
 Exceptions
 ----------
 
+.. class:: Error()
+
+  Base exception class. All other exceptions inherit from this one.
+
 .. class:: NoSuchProcess(pid, name=None, msg=None)
 
    Raised by :class:`Process` class methods when no process with the given
    *pid* is found in the current process list or when a process no longer
-   exists.
+   exists. "name" is the name the process had before disappearing
+   and gets set only if :meth:`Process.name()` was previosly called.
 
 .. class:: AccessDenied(pid=None, name=None, msg=None)
 
     Raised by :class:`Process` class methods when permission to perform an
-    action is denied.
+    action is denied. "name" is the name of the process (may be ``None``).
 
 .. class:: TimeoutExpired(seconds, pid=None, name=None, msg=None)
 
